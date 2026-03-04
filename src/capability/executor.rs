@@ -46,22 +46,36 @@ pub struct CapabilityExecutor {
 }
 
 impl CapabilityExecutor {
+    /// Build a pooled HTTP client suitable for capability execution.
+    ///
+    /// Matches the pooling parameters used by [`HttpTransport`] so all
+    /// outbound HTTP shares the same connection-management strategy and avoids
+    /// per-request FD creation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the reqwest client cannot be created (invalid TLS config, etc.).
+    fn build_http_client() -> Client {
+        Client::builder()
+            .timeout(Duration::from_secs(60))
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .tcp_keepalive(Duration::from_secs(30))
+            .build()
+            .expect("Failed to create HTTP client")
+    }
+
     /// Create a new executor
     ///
     /// # Panics
     ///
     /// Panics if the HTTP client cannot be created.
     pub fn new() -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client");
-
         // Try to initialize OAuth token storage
         let token_storage = TokenStorage::default_location().ok().map(Arc::new);
 
         Self {
-            client,
+            client: Self::build_http_client(),
             cache: ResponseCache::new(),
             token_storage,
             oauth_tokens: RwLock::new(DashMap::new()),
@@ -76,13 +90,8 @@ impl CapabilityExecutor {
     /// Panics if the HTTP client cannot be created.
     #[must_use]
     pub fn with_token_storage(token_storage: Arc<TokenStorage>) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("Failed to create HTTP client");
-
         Self {
-            client,
+            client: Self::build_http_client(),
             cache: ResponseCache::new(),
             token_storage: Some(token_storage),
             oauth_tokens: RwLock::new(DashMap::new()),
