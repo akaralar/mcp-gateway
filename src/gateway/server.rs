@@ -304,6 +304,7 @@ impl Gateway {
             Arc::clone(&self.backends),
             self.config.streaming.clone(),
         ));
+        multiplexer.spawn_reaper_on();
         let proxy_manager = Arc::new(ProxyManager::new(Arc::clone(&multiplexer)));
         let auth_config = Arc::new(ResolvedAuthConfig::from_config(&self.config.auth));
 

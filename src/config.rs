@@ -638,6 +638,15 @@ pub struct StreamingConfig {
     /// Backends to auto-subscribe for notifications
     #[serde(default)]
     pub auto_subscribe: Vec<String>,
+    /// Maximum session lifetime before reaping (default: 30 min).
+    ///
+    /// Sessions older than this with no active receivers are cleaned up by the
+    /// background reaper, preventing FD exhaustion from dropped SSE connections.
+    #[serde(with = "humantime_serde")]
+    pub session_ttl: Duration,
+    /// How often the session reaper runs (default: 60 s).
+    #[serde(with = "humantime_serde")]
+    pub session_reaper_interval: Duration,
 }
 
 impl Default for StreamingConfig {
@@ -647,6 +656,8 @@ impl Default for StreamingConfig {
             buffer_size: 100,
             keep_alive_interval: Duration::from_secs(15),
             auto_subscribe: Vec::new(),
+            session_ttl: Duration::from_secs(1800),          // 30 min
+            session_reaper_interval: Duration::from_secs(60), // 1 min
         }
     }
 }
