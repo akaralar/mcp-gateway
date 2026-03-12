@@ -146,7 +146,7 @@ impl ToolInvoker for MetaMcpInvoker<'_> {
             "tool": tool,
             "arguments": arguments
         });
-        self.meta.invoke_tool(&args, None).await
+        self.meta.invoke_tool(&args, None, None).await
     }
 }
 

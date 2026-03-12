@@ -204,7 +204,7 @@ fn routing_instructions_uses_general_for_empty_category() {
 
 #[test]
 fn build_meta_tools_returns_base_plus_playbook_and_kill_tools_without_stats_or_webhooks() {
-    let tools = build_meta_tools(false, false, false);
+    let tools = build_meta_tools(false, false, false, false);
     // 4 base + 1 playbook + 2 kill-switch + 2 profile (set/get) + 1 disabled-caps + 1 list-profiles = 11
     assert_eq!(tools.len(), 11);
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -225,7 +225,7 @@ fn build_meta_tools_returns_base_plus_playbook_and_kill_tools_without_stats_or_w
 
 #[test]
 fn build_meta_tools_returns_all_tools_with_stats_and_webhooks() {
-    let tools = build_meta_tools(true, true, false);
+    let tools = build_meta_tools(true, true, false, false);
     // 4 base + 1 stats + 1 webhooks + 1 playbook + 2 kill-switch + 2 profile (set/get) + 1 disabled-caps + 1 list-profiles = 13
     assert_eq!(tools.len(), 13);
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -245,7 +245,7 @@ fn build_meta_tools_webhooks_only_without_stats() {
     // GIVEN: webhooks enabled but stats disabled
     // WHEN: building tool list
     // THEN: webhook tool present, stats tool absent
-    let tools = build_meta_tools(false, true, false);
+    let tools = build_meta_tools(false, true, false, false);
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"gateway_webhook_status"));
     assert!(names.contains(&"gateway_list_disabled_capabilities"));
@@ -256,7 +256,7 @@ fn build_meta_tools_webhooks_only_without_stats() {
 #[test]
 fn build_meta_tools_includes_reload_when_enabled() {
     // GIVEN: reload context enabled
-    let tools = build_meta_tools(false, false, true);
+    let tools = build_meta_tools(false, false, true, false);
     // 4 base + 1 playbook + 2 kill-switch + 2 profile (set/get) + 1 disabled-caps + 1 list-profiles + 1 reload = 12
     assert_eq!(tools.len(), 12);
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -270,7 +270,7 @@ fn build_meta_tools_includes_reload_when_enabled() {
 #[test]
 fn build_meta_tools_all_enabled_includes_reload() {
     // GIVEN: all optional tools enabled
-    let tools = build_meta_tools(true, true, true);
+    let tools = build_meta_tools(true, true, true, false);
     // 4 base + 1 stats + 1 webhooks + 1 playbook + 2 kill-switch + 2 profile (set/get) + 1 disabled-caps + 1 list-profiles + 1 reload = 14
     assert_eq!(tools.len(), 14);
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
@@ -649,6 +649,8 @@ fn build_stats_response_fields() {
         tools_available: 200,
         tokens_saved: 500_000,
         top_tools: vec![],
+        total_cached_tokens: 0,
+        cached_tokens_by_server: vec![],
     };
     let resp = build_stats_response(&snapshot, 15.0);
     assert_eq!(resp["invocations"], 100);
@@ -670,6 +672,8 @@ fn build_stats_response_zero_values() {
         tools_available: 0,
         tokens_saved: 0,
         top_tools: vec![],
+        total_cached_tokens: 0,
+        cached_tokens_by_server: vec![],
     };
     let resp = build_stats_response(&snapshot, 15.0);
     assert_eq!(resp["invocations"], 0);
@@ -686,6 +690,8 @@ fn build_stats_response_custom_price() {
         tools_available: 100,
         tokens_saved: 1_000_000,
         top_tools: vec![],
+        total_cached_tokens: 0,
+        cached_tokens_by_server: vec![],
     };
     let resp = build_stats_response(&snapshot, 3.0);
     assert_eq!(resp["estimated_savings_usd"], "$3.00");

@@ -455,9 +455,10 @@ pub(super) async fn meta_mcp_handler(
                 }
             }
 
+            let api_key_name = client.as_ref().map(|c| c.name.as_str());
             state
                 .meta_mcp
-                .handle_tools_call(id, tool_name, arguments, Some(session_id.as_str()))
+                .handle_tools_call(id, tool_name, arguments, Some(session_id.as_str()), api_key_name)
                 .await
         }
         // Resources
@@ -758,4 +759,59 @@ pub(super) async fn backend_handler(
             )
         }
     }
+}
+
+/// GET /api/costs — REST endpoint for per-key and aggregate cost views.
+///
+/// Query parameters:
+/// - `key=<name>`: view cost for a single API key
+/// - `session=<id>`: view cost for a specific session
+/// - (no params): aggregate view across all sessions and keys
+pub(super) async fn costs_handler(
+    State(state): State<Arc<AppState>>,
+    request: axum::http::Request<axum::body::Body>,
+) -> impl IntoResponse {
+    use std::collections::HashMap;
+
+    let query: HashMap<String, String> = request
+        .uri()
+        .query()
+        .map(|q| {
+            q.split('&')
+                .filter_map(|part| {
+                    let mut kv = part.splitn(2, '=');
+                    let k = kv.next()?;
+                    let v = kv.next().unwrap_or("");
+                    Some((k.to_string(), v.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let tracker = state.meta_mcp.cost_tracker();
+
+    let body = if let Some(key_name) = query.get("key") {
+        match tracker.key_snapshot(key_name) {
+            Some(snap) => serde_json::to_value(snap).unwrap_or(serde_json::json!(null)),
+            None => serde_json::json!({
+                "error": format!("No data for key '{key_name}'")
+            }),
+        }
+    } else if let Some(session_id) = query.get("session") {
+        match tracker.session_snapshot(session_id) {
+            Some(snap) => serde_json::to_value(snap).unwrap_or(serde_json::json!(null)),
+            None => serde_json::json!({
+                "error": format!("No data for session '{session_id}'")
+            }),
+        }
+    } else {
+        // Aggregate view: all sessions, all keys, totals
+        serde_json::json!({
+            "aggregate": serde_json::to_value(tracker.aggregate()).unwrap_or(serde_json::json!(null)),
+            "sessions": serde_json::to_value(tracker.all_sessions()).unwrap_or(serde_json::json!([])),
+            "keys": serde_json::to_value(tracker.all_keys()).unwrap_or(serde_json::json!([])),
+        })
+    };
+
+    (StatusCode::OK, Json(body))
 }

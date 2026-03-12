@@ -297,7 +297,7 @@ async fn gateway_search_is_callable_regardless_of_code_mode_flag() {
     let meta = make_meta_mcp();
     let args = json!({ "query": "nonexistent_xyz_404" });
     let response = meta
-        .handle_tools_call(RequestId::Number(99), "gateway_search", args, None)
+        .handle_tools_call(RequestId::Number(99), "gateway_search", args, None, None)
         .await;
     // THEN: no JSON-RPC error (-32601 unknown tool), just zero results
     assert!(response.error.is_none(),
@@ -311,7 +311,7 @@ async fn gateway_execute_missing_tool_and_chain_returns_tool_call_error() {
     let meta = make_meta_mcp();
     let args = json!({});
     let response = meta
-        .handle_tools_call(RequestId::Number(100), "gateway_execute", args, None)
+        .handle_tools_call(RequestId::Number(100), "gateway_execute", args, None, None)
         .await;
     // THEN: returns an error (not -32601 unknown tool)
     // The response wraps the error as tool content (is_error=true) OR as RPC error

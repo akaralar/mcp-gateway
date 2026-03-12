@@ -26,6 +26,8 @@
 pub mod autotag;
 pub mod backend;
 pub mod cache;
+pub mod cache_key;
+pub mod cost_accounting;
 pub mod chains;
 pub mod config_reload;
 pub mod capability;
@@ -51,6 +53,7 @@ pub mod secrets;
 pub mod security;
 pub mod stats;
 pub mod transform;
+pub mod tool_registry;
 pub mod transition;
 pub mod transport;
 pub mod validator;

@@ -458,7 +458,9 @@ pub(crate) fn build_stats_response(snapshot: &StatsSnapshot, price_per_million: 
         "tools_available": snapshot.tools_available,
         "tokens_saved": snapshot.tokens_saved,
         "estimated_savings_usd": format!("${:.2}", estimated_savings),
-        "top_tools": snapshot.top_tools
+        "top_tools": snapshot.top_tools,
+        "total_cached_tokens": snapshot.total_cached_tokens,
+        "cached_tokens_by_server": snapshot.cached_tokens_by_server
     })
 }
 
