@@ -11,6 +11,7 @@ use tower_http::{catch_panic::CatchPanicLayer, compression::CompressionLayer, tr
 
 use super::auth::{AuthState, ResolvedAuthConfig, auth_middleware};
 use super::meta_mcp::MetaMcp;
+use super::oauth::{AgentAuthState, GatewayKeyPair, agent_auth_middleware, jwks_handler};
 use super::proxy::ProxyManager;
 use super::streaming::NotificationMultiplexer;
 use crate::backend::BackendRegistry;
@@ -55,6 +56,10 @@ pub struct AppState {
     /// Each in-flight request holds a permit; shutdown waits for all permits
     /// to be returned.
     pub inflight: Arc<tokio::sync::Semaphore>,
+    /// Agent auth state (issue #80 — agent-scoped JWT permissions).
+    pub agent_auth: AgentAuthState,
+    /// Gateway RSA key pair for JWKS endpoint.
+    pub gateway_key_pair: Arc<GatewayKeyPair>,
 }
 
 /// Create the router
@@ -64,14 +69,23 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         key_server: state.key_server.clone(),
     };
 
+    // Agent auth middleware state (cloned to avoid Arc wrapping AgentAuthState).
+    let agent_auth_state = state.agent_auth.clone();
+
     // Key server routes run outside the standard auth middleware (they ARE the auth step).
     let maybe_ks_routes: Option<Router> = state
         .key_server
         .as_ref()
         .map(|ks| key_server_routes(Arc::clone(ks)));
 
+    // JWKS endpoint — unauthenticated, no agent auth required.
+    let jwks_route = Router::new()
+        .route("/.well-known/jwks.json", get(jwks_handler))
+        .with_state(Arc::clone(&state.gateway_key_pair));
+
     let mut app = Router::new()
         .route("/health", get(handlers::health_handler))
+        .route("/api/costs", get(handlers::costs_handler))
         .route(
             "/mcp",
             post(handlers::meta_mcp_handler)
@@ -85,6 +99,11 @@ pub fn create_router(state: Arc<AppState>) -> Router {
             "/sse",
             get(handlers::sse_deprecated_handler).post(handlers::sse_deprecated_handler),
         )
+        // Agent JWT scope middleware runs inside the standard auth layer.
+        .layer(middleware::from_fn_with_state(
+            agent_auth_state,
+            agent_auth_middleware,
+        ))
         // Authentication middleware (applied before other layers)
         .layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .layer(CatchPanicLayer::new())
@@ -96,6 +115,9 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     if let Some(ks_routes) = maybe_ks_routes {
         app = app.merge(ks_routes);
     }
+
+    // Merge JWKS route (unauthenticated)
+    app = app.merge(jwks_route);
 
     app
 }

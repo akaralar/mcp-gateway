@@ -335,15 +335,55 @@ pub(crate) fn build_reload_config_tool() -> Tool {
     }
 }
 
+/// Build the `gateway_cost_report` meta-tool definition.
+pub(crate) fn build_cost_report_tool() -> Tool {
+    Tool {
+        name: "gateway_cost_report".to_string(),
+        title: Some("Cost Report".to_string()),
+        description: Some(
+            "Return current session and API-key spend. Includes total cost, call count, \
+             and breakdown by backend and tool. \
+             Per-key totals are shown for 24 h / 7 d / 30 d rolling windows."
+                .to_string(),
+        ),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "session_id": {
+                    "type": "string",
+                    "description": "Specific session ID to report on. Defaults to current session."
+                },
+                "include_all_sessions": {
+                    "type": "boolean",
+                    "description": "Return all active sessions (admin view). Default false.",
+                    "default": false
+                },
+                "include_all_keys": {
+                    "type": "boolean",
+                    "description": "Return all API key accumulators (admin view). Default false.",
+                    "default": false
+                }
+            },
+            "required": []
+        }),
+        output_schema: None,
+        annotations: None,
+    }
+}
+
 /// Construct the full meta-tool list, optionally including stats, webhooks, playbooks, and reload.
 pub(crate) fn build_meta_tools(
     stats_enabled: bool,
     webhooks_enabled: bool,
     reload_enabled: bool,
+    cost_report_enabled: bool,
 ) -> Vec<Tool> {
     let mut tools = build_base_tools();
     if stats_enabled {
         tools.push(build_stats_tool());
+    }
+    if cost_report_enabled {
+        tools.push(build_cost_report_tool());
     }
     if webhooks_enabled {
         tools.push(build_webhook_status_tool());
@@ -474,10 +514,10 @@ mod tests {
 
     #[test]
     fn build_meta_tools_base_count_without_optional_features() {
-        // GIVEN: no stats, webhooks, or reload
+        // GIVEN: no stats, webhooks, reload, or cost_report
         // WHEN: building meta tools
         // THEN: 4 base + 1 playbook + 2 kill/revive + 2 set/get profile + 1 disabled-caps + 1 list-profiles = 11
-        let tools = build_meta_tools(false, false, false);
+        let tools = build_meta_tools(false, false, false, false);
         assert_eq!(tools.len(), 11);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"gateway_list_servers"));
@@ -489,35 +529,43 @@ mod tests {
         assert!(!names.contains(&"gateway_get_stats"));
         assert!(!names.contains(&"gateway_webhook_status"));
         assert!(!names.contains(&"gateway_reload_config"));
+        assert!(!names.contains(&"gateway_cost_report"));
     }
 
     #[test]
     fn build_meta_tools_with_stats_adds_stats_tool() {
-        let tools = build_meta_tools(true, false, false);
+        let tools = build_meta_tools(true, false, false, false);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"gateway_get_stats"));
     }
 
     #[test]
     fn build_meta_tools_with_webhooks_adds_webhook_tool() {
-        let tools = build_meta_tools(false, true, false);
+        let tools = build_meta_tools(false, true, false, false);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"gateway_webhook_status"));
     }
 
     #[test]
     fn build_meta_tools_with_reload_adds_reload_tool() {
-        let tools = build_meta_tools(false, false, true);
+        let tools = build_meta_tools(false, false, true, false);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"gateway_reload_config"));
     }
 
     #[test]
-    fn build_meta_tools_all_enabled_has_14_tools() {
-        // 4 + 1 stats + 1 webhooks + 1 playbook + 2 kill/revive + 2 set/get profile
-        // + 1 disabled-caps + 1 list-profiles + 1 reload = 14
-        let tools = build_meta_tools(true, true, true);
-        assert_eq!(tools.len(), 14);
+    fn build_meta_tools_with_cost_report_adds_cost_report_tool() {
+        let tools = build_meta_tools(false, false, false, true);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"gateway_cost_report"));
+    }
+
+    #[test]
+    fn build_meta_tools_all_enabled_has_15_tools() {
+        // 4 base + 1 stats + 1 cost_report + 1 webhooks + 1 playbook + 2 kill/revive
+        // + 2 set/get profile + 1 disabled-caps + 1 list-profiles + 1 reload = 15
+        let tools = build_meta_tools(true, true, true, true);
+        assert_eq!(tools.len(), 15);
     }
 
     #[test]

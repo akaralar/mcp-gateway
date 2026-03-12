@@ -19,6 +19,7 @@ use crate::backend::BackendRegistry;
 use crate::config_reload::ReloadContext;
 use crate::cache::ResponseCache;
 use crate::capability::CapabilityBackend;
+use crate::cost_accounting::CostTracker;
 use crate::idempotency::{IdempotencyCache, spawn_cleanup_task};
 use crate::kill_switch::{CapabilityErrorBudgetConfig, ErrorBudgetConfig, KillSwitch};
 use crate::playbook::PlaybookEngine;
@@ -28,6 +29,7 @@ use crate::protocol::{
 use crate::ranking::SearchRanker;
 use crate::routing_profile::{ProfileRegistry, SessionProfileStore};
 use crate::stats::UsageStats;
+use crate::tool_registry::ToolRegistry;
 use crate::transition::TransitionTracker;
 use crate::{Error, Result};
 
@@ -68,6 +70,13 @@ pub struct MetaMcp {
     pub(super) reload_context: RwLock<Option<Arc<ReloadContext>>>,
     pub(super) code_mode_enabled: bool,
     pub(super) secret_injector: crate::secret_injection::SecretInjector,
+    /// Cost tracker — per-session and per-API-key spend accounting.
+    pub(super) cost_tracker: Arc<CostTracker>,
+    /// Engram-inspired O(1) tool registry with prefetching (optional).
+    ///
+    /// When `Some`, exact tool lookups short-circuit fuzzy search, and schema
+    /// prefetching is triggered after each `gateway_invoke`.
+    pub(super) tool_registry: Option<std::sync::Arc<ToolRegistry>>,
 }
 
 // ============================================================================
@@ -98,6 +107,8 @@ impl MetaMcp {
             reload_context: RwLock::new(None),
             code_mode_enabled: false,
             secret_injector: crate::secret_injection::SecretInjector::empty(),
+            cost_tracker: Arc::new(CostTracker::new()),
+            tool_registry: None,
         }
     }
 
@@ -129,7 +140,15 @@ impl MetaMcp {
             reload_context: RwLock::new(None),
             code_mode_enabled: false,
             secret_injector: crate::secret_injection::SecretInjector::empty(),
+            cost_tracker: Arc::new(CostTracker::new()),
+            tool_registry: None,
         }
+    }
+
+    /// Expose the cost tracker for external use (budget configuration, REST handler).
+    #[must_use]
+    pub fn cost_tracker(&self) -> Arc<CostTracker> {
+        Arc::clone(&self.cost_tracker)
     }
 }
 
@@ -193,6 +212,18 @@ impl MetaMcp {
         *self.capabilities.write() = Some(capabilities);
     }
 
+    /// Attach a [`ToolRegistry`] for O(1) tool schema resolution (consuming builder).
+    ///
+    /// Call this in the construction chain before the `MetaMcp` is wrapped in an `Arc`.
+    /// After each `gateway_invoke`, the registry's prefetch engine is triggered to warm
+    /// schemas for likely-next tools using the session transition history.
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn with_tool_registry(mut self, registry: std::sync::Arc<ToolRegistry>) -> Self {
+        self.tool_registry = Some(registry);
+        self
+    }
+
     /// Expose the kill switch for external introspection or testing.
     #[allow(dead_code)]
     pub fn kill_switch(&self) -> Arc<KillSwitch> {
@@ -243,6 +274,10 @@ impl MetaMcp {
 
     pub(super) fn get_transition_tracker(&self) -> Option<Arc<TransitionTracker>> {
         self.transition_tracker.read().clone()
+    }
+
+    pub(super) fn get_tool_registry(&self) -> Option<std::sync::Arc<ToolRegistry>> {
+        self.tool_registry.clone()
     }
 
     pub(super) fn get_capabilities(&self) -> Option<Arc<CapabilityBackend>> {
@@ -333,6 +368,7 @@ impl MetaMcp {
                 self.stats.is_some(),
                 self.get_webhook_registry().is_some(),
                 self.get_reload_context().is_some(),
+                true, // cost_report always enabled (tracker is always present)
             )
         };
         let result = ToolsListResult { tools, next_cursor: None };
@@ -340,12 +376,15 @@ impl MetaMcp {
     }
 
     /// Handle `tools/call` — dispatch to the appropriate handler.
+    ///
+    /// `api_key_name` — the name of the authenticated API key (for cost accounting).
     pub async fn handle_tools_call(
         &self,
         id: RequestId,
         tool_name: &str,
         arguments: Value,
         session_id: Option<&str>,
+        api_key_name: Option<&str>,
     ) -> JsonRpcResponse {
         let result = match tool_name {
             "gateway_search" => self.code_mode_search(&arguments, session_id).await,
@@ -353,8 +392,9 @@ impl MetaMcp {
             "gateway_list_servers" => self.list_servers(),
             "gateway_list_tools" => self.list_tools(&arguments, session_id).await,
             "gateway_search_tools" => self.search_tools(&arguments, session_id).await,
-            "gateway_invoke" => self.invoke_tool(&arguments, session_id).await,
+            "gateway_invoke" => self.invoke_tool(&arguments, session_id, api_key_name).await,
             "gateway_get_stats" => self.get_stats(&arguments).await,
+            "gateway_cost_report" => self.get_cost_report(&arguments, session_id).await,
             "gateway_webhook_status" => self.webhook_status(),
             "gateway_run_playbook" => self.run_playbook(&arguments).await,
             "gateway_kill_server" => self.kill_server(&arguments),

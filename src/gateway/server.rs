@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 
 use super::auth::ResolvedAuthConfig;
 use super::meta_mcp::MetaMcp;
+use super::oauth::{AgentAuthState, AgentDefinition, AgentRegistry, GatewayKeyPair};
 use super::proxy::ProxyManager;
 use super::router::{AppState, create_router};
 use super::streaming::NotificationMultiplexer;
@@ -381,6 +382,48 @@ impl Gateway {
             None
         };
 
+        // Build agent registry from config.
+        let agent_registry = Arc::new(AgentRegistry::new());
+        for def in &self.config.agent_auth.agents {
+            let secret = def.resolved_hs256_secret();
+            agent_registry.register(AgentDefinition {
+                client_id: def.client_id.clone(),
+                name: def.name.clone(),
+                hs256_secret: secret,
+                rs256_public_key: def.rs256_public_key.clone(),
+                scopes: def.scopes.clone(),
+                issuer: def.issuer.clone(),
+                audience: def.audience.clone(),
+            });
+        }
+        let agent_auth = AgentAuthState::new(
+            self.config.agent_auth.enabled,
+            Arc::clone(&agent_registry),
+        );
+        if self.config.agent_auth.enabled {
+            info!(
+                agents = agent_registry.len(),
+                "Agent auth (issue #80) enabled"
+            );
+        }
+
+        // Generate gateway RSA key pair for JWKS endpoint.
+        let gateway_key_pair = Arc::new(match GatewayKeyPair::generate() {
+            Ok(kp) => {
+                info!(kid = %kp.key_info().kid, "Gateway RSA key pair generated (JWKS available at /.well-known/jwks.json)");
+                kp
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to generate gateway RSA key pair; JWKS will be empty");
+                // Fallback: return a trivially unusable key pair that won't block startup.
+                // This path should not occur on any normal platform.
+                GatewayKeyPair::generate().unwrap_or_else(|_| {
+                    // Last resort: produce a dummy pair (panics on catastrophic failure).
+                    GatewayKeyPair::generate().expect("RSA key pair generation failed twice")
+                })
+            }
+        });
+
         let state = Arc::new(AppState {
             backends: Arc::clone(&self.backends),
             meta_mcp,
@@ -395,6 +438,8 @@ impl Gateway {
             sanitize_input: self.config.security.sanitize_input,
             ssrf_protection: self.config.security.ssrf_protection,
             inflight: Arc::clone(&inflight),
+            agent_auth,
+            gateway_key_pair,
         });
 
         // Create router

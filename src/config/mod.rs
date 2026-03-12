@@ -21,11 +21,11 @@ use crate::{Error, Result};
 
 // Re-export all feature config types so external code needs only `crate::config::Foo`.
 pub use features::{
-    ApiKeyConfig, AuthConfig, CacheConfig, CapabilityConfig, CircuitBreakerConfig, CodeModeConfig,
-    FailsafeConfig, HealthCheckConfig, KeyServerConfig, KeyServerOidcConfig,
-    KeyServerPolicyConfig, KeyServerProviderConfig, PlaybooksConfig, PolicyMatchConfig,
-    PolicyScopesConfig, RateLimitConfig, RetryConfig, SecurityConfig, StreamingConfig,
-    WebhookConfig,
+    AgentAuthConfig, AgentDefinitionConfig, ApiKeyConfig, AuthConfig, CacheConfig, CapabilityConfig,
+    CircuitBreakerConfig, CodeModeConfig, FailsafeConfig, HealthCheckConfig, KeyServerConfig,
+    KeyServerOidcConfig, KeyServerPolicyConfig, KeyServerProviderConfig, PlaybooksConfig,
+    PolicyMatchConfig, PolicyScopesConfig, RateLimitConfig, RetryConfig, SecurityConfig,
+    StreamingConfig, WebhookConfig,
 };
 
 // ── Root config ───────────────────────────────────────────────────────────────
@@ -76,6 +76,9 @@ pub struct Config {
     /// Key Server — OIDC identity to temporary scoped API keys.
     #[serde(default)]
     pub key_server: KeyServerConfig,
+    /// Agent Auth — OAuth 2.0 agent-scoped tool permissions.
+    #[serde(default)]
+    pub agent_auth: AgentAuthConfig,
 }
 
 fn default_routing_profile() -> String {

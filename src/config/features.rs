@@ -310,6 +310,83 @@ impl Default for CapabilityConfig {
     }
 }
 
+// ── Agent Auth ────────────────────────────────────────────────────────────────
+
+/// Configuration for agent-scoped OAuth 2.0 tool permissions (issue #80).
+///
+/// When enabled, every tool invocation must carry a valid agent JWT.
+/// Agents are registered with a `client_id` and a set of permitted tool scopes.
+///
+/// # Example
+///
+/// ```yaml
+/// agent_auth:
+///   enabled: true
+///   agents:
+///     - client_id: "my-backend-agent"
+///       name: "My Backend Agent"
+///       hs256_secret: "env:AGENT_SECRET"
+///       scopes:
+///         - "tools:surreal:*"
+///         - "tools:brave:search:read"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AgentAuthConfig {
+    /// Enable agent auth (default: false).
+    pub enabled: bool,
+    /// Statically configured agents.
+    #[serde(default)]
+    pub agents: Vec<AgentDefinitionConfig>,
+}
+
+impl Default for AgentAuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            agents: Vec::new(),
+        }
+    }
+}
+
+/// Static agent definition in the configuration file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentDefinitionConfig {
+    /// Unique client identifier.
+    pub client_id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// HS256 shared secret. Supports `env:VAR_NAME`.
+    #[serde(default)]
+    pub hs256_secret: Option<String>,
+    /// PEM-encoded RSA public key for RS256 verification.
+    #[serde(default)]
+    pub rs256_public_key: Option<String>,
+    /// Granted scopes (e.g., `tools:surreal:*`).
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Expected issuer (`iss` claim). Optional.
+    #[serde(default)]
+    pub issuer: Option<String>,
+    /// Expected audience (`aud` claim). Optional.
+    #[serde(default)]
+    pub audience: Option<String>,
+}
+
+impl AgentDefinitionConfig {
+    /// Resolve the HS256 secret, expanding `env:VAR_NAME` syntax.
+    #[must_use]
+    pub fn resolved_hs256_secret(&self) -> Option<String> {
+        self.hs256_secret.as_ref().map(|s| {
+            if let Some(var) = s.strip_prefix("env:") {
+                env::var(var).unwrap_or_else(|_| s.clone())
+            } else {
+                s.clone()
+            }
+        })
+    }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 /// Authentication configuration for gateway access.
