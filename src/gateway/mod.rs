@@ -4,6 +4,7 @@ pub mod auth;
 mod differential;
 mod meta_mcp;
 mod meta_mcp_helpers;
+mod meta_mcp_tool_defs;
 pub mod proxy;
 mod router;
 mod server;
