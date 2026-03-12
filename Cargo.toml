@@ -125,7 +125,7 @@ panic = "abort"
 strip = true
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -20,6 +20,7 @@ fn create_test_backend(name: &str, command: &str) -> Backend {
         env: HashMap::default(),
         headers: HashMap::default(),
         oauth: None,
+        secrets: Vec::new(),
     };
 
     let failsafe = FailsafeConfig::default();

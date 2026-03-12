@@ -42,15 +42,16 @@ providers:
         Content-Type: "application/json"
       body:
         query: >
-          query ListIssues($teamKey: String!, $first: Int, $after: String) {
+          query ListIssues($teamKey: String!, $first: Int, $after: String, $stateType: String) {
             team(id: $teamKey) {
-              issues(first: $first, after: $after, orderBy: updatedAt) {
+              issues(first: $first, after: $after, orderBy: updatedAt, filter: { state: { type: { eq: $stateType } } }) {
                 nodes {
                   id identifier title priority priorityLabel
                   state { name type color }
                   assignee { displayName }
                   labels { nodes { name color } }
                   project { name }
+                  children { nodes { identifier title state { name type } } }
                   createdAt updatedAt
                   url
                 }
@@ -62,6 +63,7 @@ providers:
           teamKey: "{teamKey}"
           first: "{first}"
           after: "{after}"
+          stateType: "{state}"
 
 cache:
   strategy: exact

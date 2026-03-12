@@ -198,6 +198,10 @@ impl Gateway {
             );
         }
 
+        // Build secret injector from backend configs (credential brokering)
+        let secret_injector =
+            crate::secret_injection::SecretInjector::from_backend_configs(&self.config.backends);
+
         // Create app state with cache, stats, and ranking support
         let meta_mcp = Arc::new(
             MetaMcp::with_features(
@@ -208,7 +212,8 @@ impl Gateway {
                 self.config.cache.default_ttl,
             )
             .with_profile_registry(profile_registry)
-            .with_code_mode(self.config.code_mode.enabled),
+            .with_code_mode(self.config.code_mode.enabled)
+            .with_secret_injector(secret_injector),
         );
 
         // Attach transition tracker for predictive tool prefetch

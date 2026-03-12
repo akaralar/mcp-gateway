@@ -20,7 +20,7 @@
 //! - 2024-11-05
 //! - 2024-10-07
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod autotag;
@@ -45,6 +45,7 @@ pub mod protocol;
 pub mod ranking;
 pub mod registry;
 pub mod routing_profile;
+pub mod secret_injection;
 pub mod secrets;
 pub mod security;
 pub mod stats;
