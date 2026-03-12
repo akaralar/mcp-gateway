@@ -95,6 +95,8 @@ pub struct MetaMcp {
     /// Code Mode: when `true`, `tools/list` returns only `gateway_search` + `gateway_execute`
     /// instead of the full meta-tool set.
     code_mode_enabled: bool,
+    /// Secret injection proxy — injects credentials into tool calls at dispatch time.
+    secret_injector: crate::secret_injection::SecretInjector,
 }
 
 impl MetaMcp {
@@ -120,6 +122,7 @@ impl MetaMcp {
             session_profiles: Arc::new(SessionProfileStore::new()),
             reload_context: RwLock::new(None),
             code_mode_enabled: false,
+            secret_injector: crate::secret_injection::SecretInjector::empty(),
         }
     }
 
@@ -150,6 +153,7 @@ impl MetaMcp {
             session_profiles: Arc::new(SessionProfileStore::new()),
             reload_context: RwLock::new(None),
             code_mode_enabled: false,
+            secret_injector: crate::secret_injection::SecretInjector::empty(),
         }
     }
 
@@ -170,6 +174,16 @@ impl MetaMcp {
     #[must_use]
     pub fn with_code_mode(mut self, enabled: bool) -> Self {
         self.code_mode_enabled = enabled;
+        self
+    }
+
+    /// Builder-style: attach a secret injector for credential brokering.
+    ///
+    /// When configured, the gateway transparently injects credentials into
+    /// tool calls before forwarding to backends. Agents never see raw secrets.
+    #[must_use]
+    pub fn with_secret_injector(mut self, injector: crate::secret_injection::SecretInjector) -> Self {
+        self.secret_injector = injector;
         self
     }
 
@@ -1160,12 +1174,22 @@ impl MetaMcp {
     }
 
     /// Dispatch a `tools/call` to the capability backend or an MCP backend.
+    ///
+    /// Before dispatching, applies secret injection: any credential rules
+    /// configured for this backend are resolved and merged into the tool
+    /// arguments (or set as headers). Agents never see raw credential values.
     async fn dispatch_to_backend(
         &self,
         server: &str,
         tool: &str,
         arguments: Value,
     ) -> Result<Value> {
+        // ── Secret injection ─────────────────────────────────────────────
+        // Resolve and inject credentials before forwarding to the backend.
+        // This runs for both capability and MCP backends.
+        let injection = self.secret_injector.inject(server, tool, arguments)?;
+        let arguments = injection.arguments;
+
         if let Some(cap) = self.get_capabilities() {
             if server == cap.name && cap.has_capability(tool) {
                 let result = cap.call_tool(tool, arguments).await?;

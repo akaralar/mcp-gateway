@@ -38,8 +38,8 @@ providers:
         Content-Type: "application/json"
       body:
         query: >
-          query GetIssue($identifier: String!) {
-            issueSearch(query: $identifier, first: 1) {
+          query GetIssue($term: String!) {
+            searchIssues(term: $term, first: 1, includeArchived: false, includeComments: true) {
               nodes {
                 id identifier title description priority priorityLabel estimate
                 state { id name type color }
@@ -68,7 +68,7 @@ providers:
             }
           }
         variables:
-          identifier: "{identifier}"
+          term: "{identifier}"
 
 cache:
   strategy: exact

@@ -803,6 +803,12 @@ pub struct BackendConfig {
     /// OAuth configuration (optional)
     #[serde(default)]
     pub oauth: Option<OAuthConfig>,
+    /// Secret injection rules — credentials injected into tool calls at dispatch time.
+    ///
+    /// Agents never see raw credential values. The gateway resolves and injects
+    /// them transparently before forwarding to the backend.
+    #[serde(default)]
+    pub secrets: Vec<crate::secret_injection::CredentialRule>,
 }
 
 /// OAuth configuration for a backend
@@ -845,6 +851,7 @@ impl Default for BackendConfig {
             env: HashMap::new(),
             headers: HashMap::new(),
             oauth: None,
+            secrets: Vec::new(),
         }
     }
 }
