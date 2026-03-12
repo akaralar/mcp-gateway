@@ -461,3 +461,138 @@ pub(crate) fn build_code_mode_tools() -> Vec<Tool> {
         build_code_mode_execute_tool(),
     ]
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── build_meta_tools ────────────────────────────────────────────────
+
+    #[test]
+    fn build_meta_tools_base_count_without_optional_features() {
+        // GIVEN: no stats, webhooks, or reload
+        // WHEN: building meta tools
+        // THEN: 4 base + 1 playbook + 2 kill/revive + 2 set/get profile + 1 disabled-caps + 1 list-profiles = 11
+        let tools = build_meta_tools(false, false, false);
+        assert_eq!(tools.len(), 11);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"gateway_list_servers"));
+        assert!(names.contains(&"gateway_invoke"));
+        assert!(names.contains(&"gateway_run_playbook"));
+        assert!(names.contains(&"gateway_kill_server"));
+        assert!(names.contains(&"gateway_revive_server"));
+        assert!(names.contains(&"gateway_list_profiles"));
+        assert!(!names.contains(&"gateway_get_stats"));
+        assert!(!names.contains(&"gateway_webhook_status"));
+        assert!(!names.contains(&"gateway_reload_config"));
+    }
+
+    #[test]
+    fn build_meta_tools_with_stats_adds_stats_tool() {
+        let tools = build_meta_tools(true, false, false);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"gateway_get_stats"));
+    }
+
+    #[test]
+    fn build_meta_tools_with_webhooks_adds_webhook_tool() {
+        let tools = build_meta_tools(false, true, false);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"gateway_webhook_status"));
+    }
+
+    #[test]
+    fn build_meta_tools_with_reload_adds_reload_tool() {
+        let tools = build_meta_tools(false, false, true);
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"gateway_reload_config"));
+    }
+
+    #[test]
+    fn build_meta_tools_all_enabled_has_14_tools() {
+        // 4 + 1 stats + 1 webhooks + 1 playbook + 2 kill/revive + 2 set/get profile
+        // + 1 disabled-caps + 1 list-profiles + 1 reload = 14
+        let tools = build_meta_tools(true, true, true);
+        assert_eq!(tools.len(), 14);
+    }
+
+    #[test]
+    fn build_base_tools_all_have_descriptions() {
+        for tool in build_base_tools() {
+            assert!(tool.description.is_some(), "Tool {} missing description", tool.name);
+        }
+    }
+
+    #[test]
+    fn build_base_tools_all_have_object_schema() {
+        for tool in build_base_tools() {
+            assert_eq!(tool.input_schema["type"], "object", "Tool {} has non-object schema", tool.name);
+        }
+    }
+
+    #[test]
+    fn build_kill_server_tool_requires_server_param() {
+        let tool = build_kill_server_tool();
+        assert_eq!(tool.name, "gateway_kill_server");
+        assert_eq!(tool.input_schema["required"][0], "server");
+    }
+
+    #[test]
+    fn build_revive_server_tool_requires_server_param() {
+        let tool = build_revive_server_tool();
+        assert_eq!(tool.name, "gateway_revive_server");
+        assert_eq!(tool.input_schema["required"][0], "server");
+    }
+
+    // ── Code Mode tool definitions ──────────────────────────────────────────
+
+    #[test]
+    fn build_code_mode_tools_returns_exactly_two_tools() {
+        let tools = build_code_mode_tools();
+        assert_eq!(tools.len(), 2);
+    }
+
+    #[test]
+    fn build_code_mode_tools_are_gateway_search_and_execute() {
+        let tools = build_code_mode_tools();
+        assert_eq!(tools[0].name, "gateway_search");
+        assert_eq!(tools[1].name, "gateway_execute");
+    }
+
+    #[test]
+    fn build_code_mode_search_tool_has_required_query_param() {
+        let tool = build_code_mode_search_tool();
+        assert_eq!(tool.input_schema["properties"]["query"]["type"], "string");
+        assert_eq!(tool.input_schema["required"][0], "query");
+    }
+
+    #[test]
+    fn build_code_mode_search_tool_has_limit_and_schema_params() {
+        let tool = build_code_mode_search_tool();
+        assert_eq!(tool.input_schema["properties"]["limit"]["type"], "integer");
+        assert_eq!(tool.input_schema["properties"]["include_schema"]["type"], "boolean");
+    }
+
+    #[test]
+    fn build_code_mode_execute_tool_has_tool_chain_arguments_params() {
+        let tool = build_code_mode_execute_tool();
+        assert_eq!(tool.input_schema["properties"]["tool"]["type"], "string");
+        assert_eq!(tool.input_schema["properties"]["chain"]["type"], "array");
+        assert_eq!(tool.input_schema["properties"]["arguments"]["type"], "object");
+    }
+
+    #[test]
+    fn all_code_mode_tools_have_descriptions() {
+        for tool in build_code_mode_tools() {
+            assert!(
+                tool.description.as_deref().is_some_and(|d| !d.is_empty()),
+                "Tool {} missing description",
+                tool.name
+            );
+        }
+    }
+}
