@@ -347,8 +347,19 @@ impl Default for CapabilityConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            name: "fulcrum".to_string(),
-            directories: vec!["capabilities".to_string()],
+            name: "gateway".to_string(),
+            directories: {
+                let mut dirs = vec!["capabilities".to_string()];
+                // Auto-discover private capabilities overlay
+                if let Some(home) = std::env::var_os("HOME") {
+                    let private_dir = std::path::Path::new(&home)
+                        .join("github/mcp-gateway-private/capabilities");
+                    if private_dir.is_dir() {
+                        dirs.push(private_dir.to_string_lossy().into_owned());
+                    }
+                }
+                dirs
+            },
         }
     }
 }
