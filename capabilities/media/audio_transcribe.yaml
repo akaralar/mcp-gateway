@@ -1,0 +1,132 @@
+fulcrum: "1.0"
+name: audio_transcribe
+description: >
+  Transcribe audio files to text using OpenAI Whisper API.
+  Supports MP3, MP4, MPEG, MPGA, M4A, WAV, and WebM formats.
+  Returns timestamped transcription with optional translation to English.
+
+schema:
+  input:
+    type: object
+    properties:
+      audio_url:
+        type: string
+        description: >
+          Publicly accessible URL of the audio file to transcribe.
+          The file will be downloaded and sent to the Whisper API.
+          Maximum file size: 25 MB.
+        examples:
+          - "https://example.com/meeting.mp3"
+      language:
+        type: string
+        description: >
+          ISO-639-1 language code of the audio (e.g., "en", "fr", "de").
+          If omitted, Whisper auto-detects the language.
+        examples:
+          - "en"
+          - "fr"
+      prompt:
+        type: string
+        description: >
+          Optional context hint to improve transcription accuracy.
+          Use to provide technical terms, speaker names, or domain vocabulary.
+        examples:
+          - "This is a medical consultation about cardiology."
+      response_format:
+        type: string
+        description: Output format for the transcription
+        enum: [json, text, srt, verbose_json, vtt]
+        default: json
+      temperature:
+        type: number
+        description: >
+          Sampling temperature (0-1). Lower values produce more deterministic output.
+          Set to 0 for maximum consistency.
+        default: 0
+        minimum: 0
+        maximum: 1
+      translate:
+        type: boolean
+        description: >
+          When true, translates the audio to English regardless of source language.
+          Uses the translations endpoint instead of transcriptions.
+        default: false
+    required:
+      - audio_url
+  output:
+    type: object
+    properties:
+      text:
+        type: string
+        description: Full transcribed text
+      segments:
+        type: array
+        description: Word-level segments with timestamps (verbose_json format)
+        items:
+          type: object
+          properties:
+            start:
+              type: number
+            end:
+              type: number
+            text:
+              type: string
+      language:
+        type: string
+        description: Detected language (ISO-639-1)
+      duration:
+        type: number
+        description: Audio duration in seconds
+
+providers:
+  primary:
+    service: rest
+    cost_per_call: 0.006
+    timeout: 120
+    config:
+      base_url: https://api.openai.com
+      path: /v1/audio/transcriptions
+      method: POST
+      headers:
+        Authorization: "Bearer {env.OPENAI_API_KEY}"
+        Content-Type: "application/json"
+      body:
+        model: "whisper-1"
+        url: "{audio_url}"
+        language: "{language}"
+        prompt: "{prompt}"
+        response_format: "{response_format}"
+        temperature: "{temperature}"
+
+auth:
+  required: true
+  type: bearer
+  key: "env:OPENAI_API_KEY"
+  description: >
+    Requires an OpenAI API key with audio access.
+    Set OPENAI_API_KEY environment variable.
+    Pricing: $0.006/minute of audio.
+
+cache:
+  strategy: exact
+  ttl: 3600
+
+metadata:
+  category: media
+  tags:
+    - audio
+    - transcription
+    - speech-to-text
+    - stt
+    - whisper
+    - openai
+  cost_category: cheap
+  execution_time: slow
+  read_only: true
+  produces:
+    - transcriptionText
+  consumes:
+    - audioUrl
+  chains_with:
+    - audio_tts
+  docs: https://platform.openai.com/docs/api-reference/audio/createTranscription
