@@ -63,6 +63,9 @@ pub struct AppState {
     /// Configured capability directories (for Web UI capability management).
     /// Empty when the capability system is disabled.
     pub capability_dirs: Vec<String>,
+    /// Path to the gateway config file on disk (enables API-driven config writes).
+    /// `None` when the gateway was started without a config file path.
+    pub config_path: Option<std::path::PathBuf>,
 }
 
 /// Create the router.
