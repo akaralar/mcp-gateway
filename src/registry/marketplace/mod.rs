@@ -254,7 +254,7 @@ impl MarketplaceClient {
     ///
     /// Returns [`Error::Config`] when the plugin is not found, or [`Error::Io`]
     /// when the directory cannot be removed.
-    pub async fn uninstall(name: &str, plugin_dir: &Path) -> Result<()> {
+    pub fn uninstall(name: &str, plugin_dir: &Path) -> Result<()> {
         let plugin_path = plugin_dir.join(name);
         if !plugin_path.exists() {
             return Err(Error::Config(format!(
@@ -361,13 +361,10 @@ fn read_installed_from_dir(dir: &Path) -> Result<InstalledPlugin> {
     let installed_at = std::fs::metadata(&manifest_path)
         .ok()
         .and_then(|m| m.modified().ok())
-        .map(|t| {
-            t.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| {
-                    DateTime::from_timestamp(d.as_secs() as i64, d.subsec_nanos())
-                        .unwrap_or_else(Utc::now)
-                })
-                .unwrap_or_else(|_| Utc::now())
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .and_then(|d| {
+            let secs = i64::try_from(d.as_secs()).ok()?;
+            DateTime::from_timestamp(secs, d.subsec_nanos())
         })
         .unwrap_or_else(Utc::now);
 
@@ -549,14 +546,14 @@ mod tests {
         )
         .unwrap();
 
-        MarketplaceClient::uninstall("to-remove", tmp.path()).await.unwrap();
+        MarketplaceClient::uninstall("to-remove", tmp.path()).unwrap();
         assert!(!plugin_path.exists());
     }
 
     #[tokio::test]
     async fn uninstall_returns_error_for_unknown_plugin() {
         let tmp = TempDir::new().unwrap();
-        let result = MarketplaceClient::uninstall("ghost", tmp.path()).await;
+        let result = MarketplaceClient::uninstall("ghost", tmp.path());
         assert!(result.is_err());
     }
 

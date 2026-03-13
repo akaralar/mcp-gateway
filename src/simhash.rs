@@ -60,7 +60,7 @@ fn fnv1a(input: &str) -> u64 {
 // Core simhash
 // ============================================================================
 
-/// Compute a 64-bit SimHash (Charikar 2002) from a set of string features.
+/// Compute a 64-bit `SimHash` (Charikar 2002) from a set of string features.
 ///
 /// Each feature is hashed with FNV-1a. The 64 "column weights" are
 /// incremented for every set bit and decremented for every clear bit across
@@ -177,7 +177,7 @@ impl SimhashIndex {
     #[must_use]
     pub fn find_similar(&self, hash: u64, threshold: f64) -> Vec<(String, f64)> {
         debug_assert!(
-            threshold >= 0.0 && threshold <= 1.0,
+            (0.0..=1.0).contains(&threshold),
             "threshold must be in [0.0, 1.0], got {threshold}"
         );
 
@@ -359,7 +359,7 @@ impl CacheRouter {
     pub fn new(num_partitions: usize, similarity_threshold: f64) -> Self {
         assert!(num_partitions > 0, "num_partitions must be at least 1");
         assert!(
-            similarity_threshold >= 0.0 && similarity_threshold <= 1.0,
+            (0.0..=1.0).contains(&similarity_threshold),
             "similarity_threshold must be in [0.0, 1.0]"
         );
         Self {
@@ -418,8 +418,7 @@ impl CacheRouter {
             .iter()
             .enumerate()
             .min_by_key(|(_, p)| p.last_used)
-            .map(|(i, _)| i)
-            .unwrap_or(0);
+            .map_or(0, |(i, _)| i);
 
         self.partitions[lru_idx].sessions.clear();
         self.partitions[lru_idx].sessions.push(session_id);
@@ -527,12 +526,14 @@ impl SessionContext {
     }
 
     /// Add a tool name.
+    #[must_use]
     pub fn add_tool(mut self, name: impl Into<String>) -> Self {
         self.tool_names.push(name.into());
         self
     }
 
     /// Add an argument key.
+    #[must_use]
     pub fn add_arg_key(mut self, key: impl Into<String>) -> Self {
         self.argument_keys.push(key.into());
         self
@@ -561,9 +562,9 @@ impl SessionContext {
 ///
 /// This is a thin convenience wrapper around repeated `similarity_score` calls.
 #[must_use]
-pub fn find_similar_hashes(
+pub fn find_similar_hashes<S: std::hash::BuildHasher>(
     query: u64,
-    candidates: &HashMap<String, u64>,
+    candidates: &HashMap<String, u64, S>,
     threshold: f64,
 ) -> Vec<(String, f64)> {
     let mut results: Vec<(String, f64)> = candidates
