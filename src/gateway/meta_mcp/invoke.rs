@@ -12,6 +12,8 @@ use tracing::{debug, warn};
 
 use crate::cache::ResponseCache;
 use crate::cache_key::{CacheKeyDeriver, extract_cached_tokens, inject_cache_key};
+#[cfg(feature = "cost-governance")]
+use crate::cost_accounting::suggestions;
 use crate::idempotency::{GuardOutcome, enforce};
 use crate::playbook::PlaybookEngine;
 use crate::security::validate_tool_name;
@@ -161,6 +163,26 @@ impl MetaMcp {
 
         debug!(server, tool, trace_id, "Invoking tool");
 
+        // === PRE-INVOKE: Cost governance budget check ===
+        //
+        // Returns the warnings to inject post-dispatch and blocks when the
+        // budget is exceeded (returns JSON-RPC -32003 error).
+        #[cfg(feature = "cost-governance")]
+        let cost_warnings: Vec<String> = if let Some(ref enforcer) = self.budget_enforcer {
+            let result = enforcer.check(tool, api_key_name);
+            if !result.allowed {
+                return Err(Error::json_rpc(
+                    -32003,
+                    result
+                        .block_reason
+                        .unwrap_or_else(|| "Budget exceeded".to_string()),
+                ));
+            }
+            result.warnings
+        } else {
+            Vec::new()
+        };
+
         // Derive a prompt_cache_key for OpenAI-compatible backends.
         // Priority: explicit _meta.prompt_cache_key from caller > session hash.
         let prompt_cache_key: Option<String> = args
@@ -212,7 +234,19 @@ impl MetaMcp {
             }
         }
 
-        let result = match dispatch_result {
+        // === POST-INVOKE: BudgetEnforcer cost recording ===
+        //
+        // Record actual spend for per-tool and global daily accumulators.
+        // Only on success — the call actually incurred the cost.
+        #[cfg(feature = "cost-governance")]
+        if dispatch_result.is_ok() {
+            if let Some(ref enforcer) = self.budget_enforcer {
+                let cost = enforcer.registry.cost_for(tool);
+                enforcer.record_spend(tool, api_key_name, cost);
+            }
+        }
+
+        let mut result = match dispatch_result {
             Ok(value) => value,
             Err(e) => {
                 if let (Some(idem_cache), Some(key)) = (&self.idempotency_cache, &idem_key) {
@@ -221,6 +255,45 @@ impl MetaMcp {
                 return Err(e);
             }
         };
+
+        // === POST-INVOKE: Inject cost warnings and suggestions ===
+        //
+        // `_cost_warnings` — active at ≥80% budget consumption (Notify tier).
+        // `_cost_suggestion` — present when a cheaper alternative exists.
+        #[cfg(feature = "cost-governance")]
+        {
+            if !cost_warnings.is_empty() {
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert(
+                        "_cost_warnings".to_string(),
+                        serde_json::json!(cost_warnings),
+                    );
+                }
+            }
+
+            if let Some(ref enforcer) = self.budget_enforcer {
+                let cost = enforcer.registry.cost_for(tool);
+                if cost > 0.0 {
+                    let all_costs = enforcer.registry.snapshot();
+                    let alternatives = enforcer.config.alternatives.as_ref();
+                    if let Some(suggestion) =
+                        suggestions::suggest_cheaper(tool, cost, &all_costs, alternatives)
+                    {
+                        if let Some(obj) = result.as_object_mut() {
+                            obj.insert(
+                                "_cost_suggestion".to_string(),
+                                serde_json::json!({
+                                    "message": suggestion.reason,
+                                    "alternative": suggestion.alternative,
+                                    "savings_per_call": suggestion.savings_per_call,
+                                    "alternative_cost": suggestion.alternative_cost,
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         if let Some(ref cache) = self.cache {
             let cache_key = ResponseCache::build_key(server, tool, &arguments);
@@ -450,6 +523,28 @@ impl MetaMcp {
         if let Value::Object(ref mut map) = response {
             map.insert("server_safety".to_string(), Value::Array(safety));
             map.insert("circuit_breakers".to_string(), Value::Array(cb_stats));
+        }
+
+        // Inject cost governance section when enabled
+        #[cfg(feature = "cost-governance")]
+        if let Some(ref enforcer) = self.budget_enforcer {
+            let snap = enforcer.snapshot();
+            let cost_section = json!({
+                "global_daily_spend_usd": snap.global_daily_usd,
+                "global_daily_limit_usd": snap.global_daily_limit,
+                "tool_daily_spend": snap.tool_daily,
+                "tool_daily_limits": snap.tool_limits,
+                "key_daily_spend": snap.key_daily,
+            });
+            if let Value::Object(ref mut map) = response {
+                map.insert("cost_governance".to_string(), cost_section);
+            }
+            if let Some(ref registry) = self.cost_registry {
+                let tool_costs = json!(registry.snapshot());
+                if let Value::Object(ref mut map) = response {
+                    map.insert("tool_costs".to_string(), tool_costs);
+                }
+            }
         }
 
         Ok(response)

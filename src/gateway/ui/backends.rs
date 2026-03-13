@@ -17,8 +17,8 @@ use std::sync::Arc;
 use axum::extract::{Extension, Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Json, Router};
 use axum::routing::{delete, get, patch, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -200,11 +200,7 @@ async fn add_backend(
 
     // Persist and reload
     if let Err(e) = write_and_reload(&state, config_path, &config).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e})),
-        )
-            .into_response();
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
     (
@@ -249,11 +245,7 @@ async fn remove_backend(
     }
 
     if let Err(e) = write_and_reload(&state, config_path, &config).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e})),
-        )
-            .into_response();
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
     (StatusCode::NO_CONTENT, Json(json!({}))).into_response()
@@ -337,20 +329,14 @@ async fn update_backend(
     } // mutable borrow released here
 
     if let Err(e) = write_and_reload(&state, config_path, &config).await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e})),
-        )
-            .into_response();
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
     Json(json!({"status": "updated", "name": name})).into_response()
 }
 
 /// `GET /ui/api/registry` — list all built-in registry entries as JSON.
-async fn list_registry(
-    client: Option<Extension<AuthenticatedClient>>,
-) -> impl IntoResponse {
+async fn list_registry(client: Option<Extension<AuthenticatedClient>>) -> impl IntoResponse {
     let client = client.map(|Extension(c)| c);
     if !is_admin(client.as_ref()) {
         return (
@@ -507,10 +493,8 @@ async fn write_and_reload(
 
     // Write atomically via a temp file + rename to minimize window of corruption
     let tmp_path = path.with_extension("yaml.tmp");
-    std::fs::write(&tmp_path, &yaml)
-        .map_err(|e| format!("Failed to write temp config: {e}"))?;
-    std::fs::rename(&tmp_path, path)
-        .map_err(|e| format!("Failed to rename config file: {e}"))?;
+    std::fs::write(&tmp_path, &yaml).map_err(|e| format!("Failed to write temp config: {e}"))?;
+    std::fs::rename(&tmp_path, path).map_err(|e| format!("Failed to rename config file: {e}"))?;
 
     // Trigger hot-reload via ReloadContext if available
     if let Some(ctx) = state.meta_mcp.reload_context() {
@@ -627,10 +611,15 @@ mod tests {
 
     #[test]
     fn all_registry_entries_serializable() {
-        let entries: Vec<RegistryEntryJson> =
-            server_registry::all().iter().map(RegistryEntryJson::from).collect();
+        let entries: Vec<RegistryEntryJson> = server_registry::all()
+            .iter()
+            .map(RegistryEntryJson::from)
+            .collect();
         // Must have all 48 built-in entries
-        assert!(entries.len() >= 40, "registry should have at least 40 entries");
+        assert!(
+            entries.len() >= 40,
+            "registry should have at least 40 entries"
+        );
         // All must serialize to JSON without error
         for e in &entries {
             serde_json::to_string(e).expect("registry entry must be JSON-serializable");

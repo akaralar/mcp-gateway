@@ -295,19 +295,10 @@ fn write_client_entry_if_exists(path: &Path, client: &str, name: &str, url: &str
 }
 
 // ── Platform path helpers ──────────────────────────────────────────────────────
+// Delegated to the shared `paths` module so both setup (import) and
+// config_export (export) resolve client paths from one place.
 
-fn home_path(rel: &str) -> std::path::PathBuf {
-    dirs::home_dir().unwrap_or_default().join(rel)
-}
-
-fn claude_desktop_path() -> std::path::PathBuf {
-    #[cfg(target_os = "macos")]
-    return home_path("Library/Application Support/Claude/claude_desktop_config.json");
-    #[cfg(target_os = "linux")]
-    return home_path(".config/Claude/claude_desktop_config.json");
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    return home_path("AppData/Roaming/Claude/claude_desktop_config.json");
-}
+use crate::commands::paths::{claude_desktop_path, home_path};
 
 // ── Output helpers ─────────────────────────────────────────────────────────────
 

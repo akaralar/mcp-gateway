@@ -70,9 +70,7 @@ pub fn add_backend<S: std::hash::BuildHasher>(
     env: HashMap<String, String, S>,
 ) -> Result<(), String> {
     if config.backends.contains_key(name) {
-        return Err(format!(
-            "Backend '{name}' already exists. Remove it first."
-        ));
+        return Err(format!("Backend '{name}' already exists. Remove it first."));
     }
 
     // Collect into a standard HashMap so it matches BackendConfig.env's field type.
@@ -310,16 +308,12 @@ pub fn write_config(path: &Path, config: &Config) -> Result<(), String> {
 
 fn backend_to_info(name: &str, backend: &BackendConfig) -> BackendInfo {
     let (transport_kind, command, url) = match &backend.transport {
-        TransportConfig::Stdio { command, .. } => (
-            "stdio".to_string(),
-            Some(command.clone()),
-            None,
-        ),
-        TransportConfig::Http { http_url, .. } => (
-            "http".to_string(),
-            None,
-            Some(http_url.clone()),
-        ),
+        TransportConfig::Stdio { command, .. } => {
+            ("stdio".to_string(), Some(command.clone()), None)
+        }
+        TransportConfig::Http { http_url, .. } => {
+            ("http".to_string(), None, Some(http_url.clone()))
+        }
     };
 
     BackendInfo {
@@ -409,14 +403,7 @@ mod tests {
     fn add_backend_stores_env_vars() {
         let mut cfg = empty_config();
         let env = HashMap::from([("API_KEY".to_string(), "secret".to_string())]);
-        add_backend(
-            &mut cfg,
-            "svc",
-            stdio_transport("cmd"),
-            String::new(),
-            env,
-        )
-        .unwrap();
+        add_backend(&mut cfg, "svc", stdio_transport("cmd"), String::new(), env).unwrap();
 
         assert_eq!(
             cfg.backends["svc"].env.get("API_KEY").map(String::as_str),
@@ -590,10 +577,7 @@ mod tests {
 
         let info = &list_backends(&cfg)[0];
         assert_eq!(info.transport, "http");
-        assert_eq!(
-            info.url.as_deref(),
-            Some("https://api.example.com/mcp")
-        );
+        assert_eq!(info.url.as_deref(), Some("https://api.example.com/mcp"));
         assert!(info.command.is_none());
     }
 

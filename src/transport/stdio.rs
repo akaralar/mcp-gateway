@@ -21,8 +21,8 @@ use tracing::{debug, error, info, warn};
 
 use super::Transport;
 use crate::protocol::{
-    JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, RequestId,
-    is_version_mismatch_error, negotiate_best_version, parse_supported_versions_from_error,
+    JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, RequestId, is_version_mismatch_error,
+    negotiate_best_version, parse_supported_versions_from_error,
 };
 use crate::{Error, Result};
 
@@ -454,16 +454,8 @@ mod tests {
 
     #[test]
     fn new_with_explicit_protocol_version() {
-        let t = StdioTransport::new(
-            "echo",
-            HashMap::new(),
-            None,
-            Some("2025-06-18".to_string()),
-        );
-        assert_eq!(
-            *t.protocol_version.read(),
-            Some("2025-06-18".to_string())
-        );
+        let t = StdioTransport::new("echo", HashMap::new(), None, Some("2025-06-18".to_string()));
+        assert_eq!(*t.protocol_version.read(), Some("2025-06-18".to_string()));
     }
 
     // =========================================================================

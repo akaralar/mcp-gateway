@@ -132,10 +132,7 @@ fn bad_name(name: &str) -> (StatusCode, Json<Value>) {
 ///
 /// Returns `(path, dir_index)` of the first match found (`.yaml` preferred
 /// over `.yml`).
-fn find_capability_file(
-    dirs: &[String],
-    name: &str,
-) -> Option<PathBuf> {
+fn find_capability_file(dirs: &[String], name: &str) -> Option<PathBuf> {
     for dir in dirs {
         for ext in &["yaml", "yml"] {
             let candidate = Path::new(dir).join(format!("{name}.{ext}"));
@@ -716,11 +713,7 @@ providers:
         // parse_capability may warn but should not error on this minimal input
         // (validate_capability requires providers.primary which is present)
         let result = validate_yaml_body(yaml);
-        assert!(
-            result.is_none(),
-            "Expected no error, got: {:?}",
-            result
-        );
+        assert!(result.is_none(), "Expected no error, got: {:?}", result);
     }
 
     #[test]
