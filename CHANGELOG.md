@@ -7,12 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-03-13
+
 ### Added
 
-- **Embedded Web Dashboard** — Operator dashboard served from the same binary and port.
-  `GET /ui` (htmx SPA with live status, tools, servers, config tabs), `GET /dashboard`
-  (server-rendered operator view with auto-refresh), and `/ui/api/*` JSON endpoints.
-  Feature-gated behind `webui` (default-enabled). Zero new dependencies.
+- **Cost Governance** (RFC-0075): Per-tool, per-key, and global daily budgets with configurable alert thresholds (log, notify, block). Live spend dashboard at `/ui/api/costs`.
+- **Security Firewall** (RFC-0071): Bidirectional request/response scanning with credential redaction (AWS keys, GitHub tokens, JWTs), prompt injection detection, shell/SQL/path traversal detection, per-tool glob rules, and NDJSON audit logging.
+- **Config Export** (RFC-0070): Export sanitized gateway config as YAML/JSON. Supports Claude Code, Cursor, Windsurf, and Zed client formats via `mcp-gateway config export`.
+- **Auto-Discovery** (RFC-0074): Discover MCP servers from npm, pip, and Docker sources with quality scoring and deduplication via `mcp-gateway discover`.
+- **Semantic Search** (RFC-0072): TF-IDF ranked tool search across all tool names and descriptions with relevance feedback learning.
+- **Tool Profiles** (RFC-0073): Usage analytics per tool with latency histograms, error categorization, usage trends, and persistent storage.
+- 19 cross-feature integration tests covering all RFC combinations.
+- Performance benchmarks for all v2.6.0 features (Criterion): firewall <1us, cost enforcer <100ns, semantic search <50us.
+- Complete example config (`examples/gateway-full.yaml`) with all options documented.
+
+### Changed
+
+- **13 dependency upgrades**: reqwest 0.12->0.13, rand 0.9->0.10, rcgen 0.13->0.14, jsonwebtoken 9.3->10.3, quick-xml 0.37->0.39, x509-parser 0.16->0.18, axum-server 0.7->0.8, md5 0.7->0.8, dialoguer 0.11->0.12, clap_complete 4.5->4.6, tokio-tungstenite 0.28, rustls 0.23, time 0.3.
+- rcgen 0.14 `Issuer` API migration -- removed ~60 lines of manual DER parsing in JWKS endpoint.
+- rand 0.10 `RngExt` API migration across 4 modules.
+- All 7 features compile-time gated with `#[cfg(feature)]` -- disable any with `--no-default-features`.
+
+### Fixed
+
+- `--no-default-features` build failure: `add`/`remove` commands gated behind `webui` feature.
+- GitHub push protection false positive for Slack token test patterns in firewall redactor tests.
+
+## [2.5.0] - 2026-03-12
+
+### Added
+
+- **Embedded Web UI** (`/ui`): htmx SPA with 5 views (Dashboard, Tools, Servers, Capabilities, Config), hash routing, search, YAML editor with line numbers. Feature-gated behind `webui`.
+- **Operator Dashboard** (`/dashboard`): Server-rendered HTML with backend health matrix, cache hit rates, top tools. Auto-refreshes every 5 seconds.
+- **Web UI Management API**: Server management, capability management, OpenAPI import via `/ui/api/*` endpoints.
+- **WebSocket transport** for MCP backends.
+- **Plugin CLI**: `plugin install`, `plugin list`, `plugin search`, `plugin uninstall` with marketplace support.
+- **Setup wizard** (`mcp-gateway setup`) with 48-server registry.
+- **CLI server management**: `add`/`remove`/`list`/`get` commands (Claude/Codex compatible syntax).
+- **Doctor command** (`mcp-gateway doctor`) for configuration diagnostics.
+- **MCP protocol version negotiation** for stdio transports.
+- Load test suite and deployment documentation.
+
+### Changed
+
+- Agent-scoped tool permissions via OAuth 2.0 JWT identity.
+- Cache key propagation for backend tool invocations.
+- Engram-inspired O(1) tool registry with prefetching.
+- Secret injection proxy with OS keychain integration.
+- Durable capability chains with step-level checkpoint/retry.
+
+### Fixed
+
+- FD exhaustion from streaming session leak + unpooled connections.
+- Split 12 oversized files under 800 LOC limit.
+- All clippy pedantic warnings resolved.
 
 ## [2.4.0] - 2026-02-25
 
@@ -155,7 +203,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration via YAML with Pydantic validation
 - systemd/launchd service templates
 
-[Unreleased]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.2.0...v2.4.0
 [2.2.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/MikkoParkkola/mcp-gateway/compare/v1.0.0...v2.0.0
