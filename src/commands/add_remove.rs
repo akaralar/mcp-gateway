@@ -195,6 +195,111 @@ pub fn run_remove_command(name: &str, config: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+// ── list ─────────────────────────────────────────────────────────────────────
+
+/// Run `mcp-gateway list`.
+pub fn run_list_command(json: bool, config: &Path) -> ExitCode {
+    let gateway_config = load_config(config);
+
+    if gateway_config.backends.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!("No backends configured in {}.", config.display());
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    if json {
+        let entries: Vec<serde_json::Value> = gateway_config
+            .backends
+            .iter()
+            .map(|(name, backend)| {
+                serde_json::json!({
+                    "name": name,
+                    "transport": format_transport(&backend.transport),
+                    "description": &backend.description,
+                    "enabled": backend.enabled,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&entries).unwrap_or_default()
+        );
+    } else {
+        println!(
+            "{} backend(s) in {}:\n",
+            gateway_config.backends.len(),
+            config.display()
+        );
+        let mut names: Vec<_> = gateway_config.backends.keys().collect();
+        names.sort();
+        for name in names {
+            let backend = &gateway_config.backends[name];
+            let transport = format_transport(&backend.transport);
+            let desc = if backend.description.is_empty() {
+                "(no description)"
+            } else {
+                &backend.description
+            };
+            let enabled = if backend.enabled { "" } else { " [disabled]" };
+            println!("  {name} ({transport}){enabled}");
+            println!("    {desc}");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+// ── get ──────────────────────────────────────────────────────────────────────
+
+/// Run `mcp-gateway get`.
+pub fn run_get_command(name: &str, config: &Path) -> ExitCode {
+    let gateway_config = load_config(config);
+
+    let Some(backend) = gateway_config.backends.get(name) else {
+        eprintln!(
+            "Error: Backend '{}' not found in {}.",
+            name,
+            config.display()
+        );
+        return ExitCode::FAILURE;
+    };
+
+    println!("Name:        {name}");
+    println!("Transport:   {}", format_transport(&backend.transport));
+    println!(
+        "Description: {}",
+        if backend.description.is_empty() { "(none)" } else { &backend.description }
+    );
+    println!("Enabled:     {}", backend.enabled);
+
+    match &backend.transport {
+        TransportConfig::Stdio { command, .. } => {
+            println!("Command:     {command}");
+        }
+        TransportConfig::Http { http_url, .. } => {
+            println!("URL:         {http_url}");
+        }
+    }
+
+    if !backend.env.is_empty() {
+        println!("Environment:");
+        for (k, v) in &backend.env {
+            println!("  {k}={v}");
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn format_transport(t: &TransportConfig) -> &'static str {
+    match t {
+        TransportConfig::Stdio { .. } => "stdio",
+        TransportConfig::Http { .. } => "http",
+    }
+}
+
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
 fn load_config(path: &Path) -> Config {
