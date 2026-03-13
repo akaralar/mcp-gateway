@@ -280,8 +280,10 @@ impl From<ActionConfig> for ScheduleAction {
 
 /// Outcome of the last execution of a scheduled job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum JobStatus {
     /// Job has never been run.
+    #[default]
     Never,
     /// Last execution succeeded.
     Ok,
@@ -315,11 +317,6 @@ struct EntryTracking {
     last_status: JobStatus,
 }
 
-impl Default for JobStatus {
-    fn default() -> Self {
-        Self::Never
-    }
-}
 
 impl ScheduleEntry {
     /// Create a new entry from config.
@@ -535,7 +532,7 @@ fn find_next_match(
         if expr.matches(&candidate) {
             return Some(candidate);
         }
-        candidate = candidate + chrono::Duration::minutes(1);
+        candidate += chrono::Duration::minutes(1);
     }
     None
 }

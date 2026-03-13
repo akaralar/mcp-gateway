@@ -469,22 +469,19 @@ async fn run_io_loop(
 
             // Outbound frame from the application.
             maybe_out = outbound_rx.recv() => {
-                match maybe_out {
-                    Some(msg) => {
-                        if let Err(e) = ws_sink.send(msg).await {
-                            error!(error = %e, "WebSocket write error");
-                            inner.connected.store(false, Ordering::Relaxed);
-                            break;
-                        }
-                        inner.session.lock().await.messages_sent += 1;
-                    }
-                    None => {
-                        // Channel dropped — application is closing the transport.
-                        debug!("WebSocket outbound channel closed; sending close frame");
-                        let _ = ws_sink.send(Message::Close(None)).await;
+                if let Some(msg) = maybe_out {
+                    if let Err(e) = ws_sink.send(msg).await {
+                        error!(error = %e, "WebSocket write error");
                         inner.connected.store(false, Ordering::Relaxed);
                         break;
                     }
+                    inner.session.lock().await.messages_sent += 1;
+                } else {
+                    // Channel dropped — application is closing the transport.
+                    debug!("WebSocket outbound channel closed; sending close frame");
+                    let _ = ws_sink.send(Message::Close(None)).await;
+                    inner.connected.store(false, Ordering::Relaxed);
+                    break;
                 }
             }
         }

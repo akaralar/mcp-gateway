@@ -301,6 +301,118 @@ auth:
 
 See [`examples/per-client-tool-scopes.yaml`](examples/per-client-tool-scopes.yaml) for complete examples.
 
+### Capability System
+
+Turn any REST API into an MCP tool by dropping a YAML file into your capabilities directory. Each file follows the Fulcrum 1.0 schema and defines the endpoint, parameters, auth, caching, and metadata. The gateway hot-reloads capabilities automatically -- no restart needed.
+
+Import from an existing OpenAPI spec to generate capability files automatically:
+
+```bash
+mcp-gateway cap import stripe-openapi.yaml --prefix stripe --output capabilities/stripe
+```
+
+Validate and test capabilities before deploying:
+
+```bash
+mcp-gateway cap validate capabilities/my_tool.yaml
+mcp-gateway cap test capabilities/my_tool.yaml --args '{"param": "value"}'
+```
+
+For the full capability YAML schema and OpenAPI import details, see [docs/OPENAPI_IMPORT.md](docs/OPENAPI_IMPORT.md). Browse and install community capabilities with `mcp-gateway cap search` and `mcp-gateway cap install` -- see [docs/COMMUNITY_REGISTRY.md](docs/COMMUNITY_REGISTRY.md).
+
+### Transform Chains
+
+Transforms modify tool definitions and responses as they pass through the gateway. They compose into ordered chains: namespace, filter, rename, then response.
+
+| Transform | Purpose |
+|-----------|---------|
+| **Namespace** | Prefix tool names (e.g. all Gmail tools become `gmail_*`) |
+| **Filter** | Allow/deny tools by name or glob pattern |
+| **Rename** | Rename individual tools |
+| **Response** | Project fields, redact PII, reshape output |
+
+Example -- field projection and PII redaction on a response:
+
+```yaml
+transform:
+  project: [id, name, department, role, status]
+  redact: [email, phone, ssn, address]
+```
+
+See [`examples/transform-example.yaml`](examples/transform-example.yaml) for a complete example.
+
+### Webhooks
+
+External services (GitHub, Linear, Stripe, etc.) can push events into the gateway via webhook endpoints. The gateway validates HMAC signatures, transforms payloads, and broadcasts them as MCP notifications to connected clients via SSE.
+
+```yaml
+webhooks:
+  enabled: true
+  base_path: /webhooks
+  require_signature: true
+```
+
+Define webhook endpoints in capability YAML files alongside regular providers. For setup guides, payload transformation, HMAC configuration, and examples, see [docs/WEBHOOKS.md](docs/WEBHOOKS.md).
+
+### Session Sandboxing
+
+Enforce per-session resource limits and access control. Sandbox profiles restrict call counts, session duration, backend access, tool usage, and payload size. Profiles are defined in the gateway config and enforced on every tool invocation before it reaches the backend.
+
+```yaml
+sandbox:
+  default_profile: strict
+  profiles:
+    strict:
+      max_calls: 50
+      max_duration: 1800
+      denied_tools: [exec, shell]
+      max_payload_bytes: 65536
+    permissive:
+      max_calls: 0
+      max_duration: 0
+```
+
+### Config Validation (Linting)
+
+Validate capability definitions against agent-UX best practices with the built-in linter. Supports text, JSON, and SARIF output for CI integration, and can auto-fix common issues.
+
+```bash
+# Validate files or directories
+mcp-gateway validate capabilities/ --format text
+
+# Output SARIF for CI (GitHub Code Scanning, etc.)
+mcp-gateway validate capabilities/ --format sarif
+
+# Auto-fix issues in place
+mcp-gateway validate capabilities/ --fix
+```
+
+### Hot Reload
+
+The gateway watches both the config file and capability directories for changes. When a file is modified:
+
+- **Capability YAML files**: Reloaded automatically within ~500ms. Add, edit, or remove a file and it is live immediately. No restart, no downtime.
+- **Gateway config** (`config.yaml`): A structural diff is computed and only changed sections are patched in-place. Backend additions, removals, and modifications are applied live. Server address/port changes require a manual restart (a warning is logged).
+- **Env files** referenced in `env_files:` are also watched and re-expanded on change.
+
+### Tunnel Mode
+
+Expose the gateway securely over the internet without opening firewall ports. Two tunnel backends are supported:
+
+- **Tailscale**: Serve the gateway over a private Tailscale network with `tailscale serve`. Optionally enable `tailscale funnel` for public access. Tailscale identity headers provide zero-trust authentication without a separate bearer token.
+- **pipenet**: Create a tunneled HTTPS endpoint via a relay server, making the gateway reachable from environments behind NAT.
+
+```yaml
+tunnel:
+  tailscale:
+    serve_port: 39401
+    funnel_enabled: false
+    auth_via_identity: true
+  pipenet:
+    server_url: "https://relay.pipenet.io"
+    subdomain: "my-gateway"
+```
+
 ### Protocol Support
 
 - **MCP Version**: 2025-11-25 (latest)
@@ -580,6 +692,22 @@ This shows: backend selection, tool invocations, circuit breaker state changes, 
 - Verify the backend is running: check `gateway_list_servers` output.
 - Tool lists are cached (default 5 minutes). Restart the gateway or wait for cache expiry after adding new backends.
 - Confirm the backend responds to `tools/list` -- some servers require initialization first.
+
+## Community Registry
+
+Share, discover, and install capability definitions from the community. Browse the built-in registry of 52+ capabilities, search by keyword, or install from any GitHub repository.
+
+```bash
+mcp-gateway cap registry-list              # Browse all capabilities
+mcp-gateway cap search weather             # Search by keyword
+mcp-gateway cap install stock_quote --from-github  # Install from GitHub
+```
+
+Submit your own capabilities via pull request. See [docs/COMMUNITY_REGISTRY.md](docs/COMMUNITY_REGISTRY.md) for the full guide.
+
+## Deployment
+
+For production deployment (Docker, systemd, TLS/mTLS, reverse proxy, monitoring, and scaling), see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Building
 
