@@ -10,7 +10,7 @@ mod plugin;
 mod setup;
 mod stats;
 
-pub use add_remove::{run_add_command, run_remove_command};
+pub use add_remove::{run_add_command, run_get_command, run_list_command, run_remove_command};
 pub use cap::run_cap_command;
 pub use doctor::run_doctor_command;
 pub use plugin::{run_plugin_install, run_plugin_list, run_plugin_search, run_plugin_uninstall};

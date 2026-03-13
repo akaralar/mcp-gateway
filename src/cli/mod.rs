@@ -190,33 +190,56 @@ pub enum Command {
 
     /// Add an MCP backend to the gateway configuration
     ///
-    /// If `name` matches a known server in the built-in registry the command
-    /// uses its default `npx` command and env-var template — no flags needed.
-    /// Pass `--command` or `--url` to add a completely custom server.
+    /// Compatible with `claude mcp add` and `codex mcp add` CLI conventions.
+    /// If `name` matches a known server in the built-in registry (48 servers),
+    /// the command and env-var template are filled automatically.
+    ///
+    /// # Examples
+    ///
+    /// ```bash
+    /// # From built-in registry (knows the npx command + required env vars):
+    /// mcp-gateway add tavily
+    ///
+    /// # Stdio server with trailing command (claude/codex style):
+    /// mcp-gateway add my-server -- npx -y @some/mcp-server --flag
+    ///
+    /// # Stdio server with env vars:
+    /// mcp-gateway add -e API_KEY=xxx my-server -- npx my-mcp-server
+    ///
+    /// # HTTP server:
+    /// mcp-gateway add --url https://mcp.sentry.dev/mcp sentry
+    ///
+    /// # Both styles work:
+    /// mcp-gateway add --command "npx -y @anthropic/mcp-server-tavily" tavily
+    /// ```
     #[command(about = "Add an MCP backend to gateway.yaml")]
     Add {
         /// Name for the new backend (used as the config key and registry lookup)
         name: String,
 
-        /// Shell command to launch the server (stdio transport)
-        #[arg(long)]
-        command: Option<String>,
-
-        /// HTTP URL for the server (HTTP/SSE transport)
+        /// HTTP URL for the server (streamable HTTP / SSE transport)
         #[arg(long)]
         url: Option<String>,
+
+        /// Shell command as a single string (alternative to trailing `-- cmd args...`)
+        #[arg(long)]
+        command: Option<String>,
 
         /// Human-readable description (defaults to registry description when available)
         #[arg(long)]
         description: Option<String>,
 
-        /// Environment variable to inject, may be repeated (KEY=VALUE)
-        #[arg(long = "env", value_name = "KEY=VALUE")]
+        /// Environment variables, may be repeated (-e KEY=VALUE or --env KEY=VALUE)
+        #[arg(short = 'e', long = "env", value_name = "KEY=VALUE")]
         env_vars: Vec<String>,
 
         /// Gateway config file to modify
         #[arg(short, long, default_value = "gateway.yaml")]
         config: PathBuf,
+
+        /// Stdio command and arguments (after `--` separator, claude/codex style)
+        #[arg(last = true)]
+        trailing_command: Vec<String>,
     },
 
     /// Remove an MCP backend from the gateway configuration
@@ -226,6 +249,29 @@ pub enum Command {
         name: String,
 
         /// Gateway config file to modify
+        #[arg(short, long, default_value = "gateway.yaml")]
+        config: PathBuf,
+    },
+
+    /// List configured MCP backends
+    #[command(about = "List all configured backends")]
+    List {
+        /// Output as JSON (codex-compatible)
+        #[arg(long)]
+        json: bool,
+
+        /// Gateway config file to read
+        #[arg(short, long, default_value = "gateway.yaml")]
+        config: PathBuf,
+    },
+
+    /// Get details about a specific MCP backend
+    #[command(about = "Show details of a configured backend")]
+    Get {
+        /// Backend name to inspect
+        name: String,
+
+        /// Gateway config file to read
         #[arg(short, long, default_value = "gateway.yaml")]
         config: PathBuf,
     },

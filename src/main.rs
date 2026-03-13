@@ -73,10 +73,17 @@ async fn main() -> ExitCode {
             description,
             env_vars,
             config,
+            trailing_command,
         }) => {
+            // Merge --command flag and trailing `-- cmd args...` (claude/codex style)
+            let effective_command = if !trailing_command.is_empty() {
+                Some(trailing_command.join(" "))
+            } else {
+                command
+            };
             commands::run_add_command(
                 &name,
-                command.as_deref(),
+                effective_command.as_deref(),
                 url.as_deref(),
                 description.as_deref(),
                 &env_vars,
@@ -85,6 +92,8 @@ async fn main() -> ExitCode {
             .await
         }
         Some(Command::Remove { name, config }) => commands::run_remove_command(&name, &config),
+        Some(Command::List { json, config }) => commands::run_list_command(json, &config),
+        Some(Command::Get { name, config }) => commands::run_get_command(&name, &config),
         Some(Command::Doctor { fix, config }) => {
             commands::run_doctor_command(fix, config.as_deref()).await
         }
