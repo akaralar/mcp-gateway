@@ -12,8 +12,8 @@ use std::process::ExitCode;
 use mcp_gateway::{
     config::TransportConfig,
     gateway::ui::backend_ops::{
-        self, add_backend, get_backend, list_backends, parse_env_vars, remove_backend,
-        resolve_transport, update_backend, write_config, BackendUpdate,
+        self, BackendUpdate, add_backend, get_backend, list_backends, parse_env_vars,
+        remove_backend, resolve_transport, update_backend, write_config,
     },
     registry::server_registry,
 };
@@ -60,7 +60,13 @@ pub async fn run_add_command(
     let mut gateway_config = backend_ops::load_config_or_default(config);
 
     // ── Insert backend ─────────────────────────────────────────────────────
-    if let Err(msg) = add_backend(&mut gateway_config, name, transport.clone(), description, env.clone()) {
+    if let Err(msg) = add_backend(
+        &mut gateway_config,
+        name,
+        transport.clone(),
+        description,
+        env.clone(),
+    ) {
         eprintln!("Error: {msg} (in {})", config.display());
         return ExitCode::FAILURE;
     }
@@ -86,10 +92,7 @@ pub async fn run_add_command(
 }
 
 /// Print which required env vars are set and which are missing.
-fn report_env_status(
-    required: &[&str],
-    provided_env: &std::collections::HashMap<String, String>,
-) {
+fn report_env_status(required: &[&str], provided_env: &std::collections::HashMap<String, String>) {
     for key in required {
         let set_in_env = std::env::var(key).is_ok();
         let set_in_config = provided_env.contains_key(*key);
@@ -145,11 +148,7 @@ pub fn run_list_command(json: bool, config: &Path) -> ExitCode {
             serde_json::to_string_pretty(&backends).unwrap_or_default()
         );
     } else {
-        println!(
-            "{} backend(s) in {}:\n",
-            backends.len(),
-            config.display()
-        );
+        println!("{} backend(s) in {}:\n", backends.len(), config.display());
         for info in &backends {
             let desc = if info.description.is_empty() {
                 "(no description)"
@@ -182,7 +181,11 @@ pub fn run_get_command(name: &str, config: &Path) -> ExitCode {
     println!("Transport:   {}", info.transport);
     println!(
         "Description: {}",
-        if info.description.is_empty() { "(none)" } else { &info.description }
+        if info.description.is_empty() {
+            "(none)"
+        } else {
+            &info.description
+        }
     );
     println!("Enabled:     {}", info.enabled);
 
@@ -210,11 +213,7 @@ pub fn run_get_command(name: &str, config: &Path) -> ExitCode {
 /// Exposed here so the CLI layer has a thin wrapper if needed later.
 /// Will be called from HTTP handlers in Task 1.2.
 #[allow(dead_code)]
-pub fn run_update_backend(
-    name: &str,
-    update: BackendUpdate,
-    config: &Path,
-) -> Result<(), String> {
+pub fn run_update_backend(name: &str, update: BackendUpdate, config: &Path) -> Result<(), String> {
     let mut gateway_config = backend_ops::load_config_or_default(config);
     update_backend(&mut gateway_config, name, update)?;
     write_config(config, &gateway_config)

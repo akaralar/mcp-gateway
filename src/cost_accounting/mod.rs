@@ -608,6 +608,19 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+// ── Cost governance submodules ────────────────────────────────────────────────
+
+#[cfg(feature = "cost-governance")]
+pub mod config;
+#[cfg(feature = "cost-governance")]
+pub mod enforcer;
+#[cfg(feature = "cost-governance")]
+pub mod persistence;
+#[cfg(feature = "cost-governance")]
+pub mod registry;
+#[cfg(feature = "cost-governance")]
+pub mod suggestions;
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

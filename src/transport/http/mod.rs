@@ -25,8 +25,8 @@ use super::Transport;
 use crate::gateway::trace;
 use crate::oauth::OAuthClient;
 use crate::protocol::{
-    JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, RequestId,
-    is_version_mismatch_error, negotiate_best_version, parse_supported_versions_from_error,
+    JsonRpcRequest, JsonRpcResponse, PROTOCOL_VERSION, RequestId, is_version_mismatch_error,
+    negotiate_best_version, parse_supported_versions_from_error,
 };
 use crate::{Error, Result};
 

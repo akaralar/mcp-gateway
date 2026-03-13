@@ -82,6 +82,10 @@ pub struct Config {
     /// Plugin marketplace and local plugin directory.
     #[serde(default)]
     pub marketplace: MarketplaceConfig,
+    /// Cost governance — per-tool budget enforcement and alerting.
+    #[cfg(feature = "cost-governance")]
+    #[serde(default)]
+    pub cost_governance: crate::cost_accounting::config::CostGovernanceConfig,
 }
 
 fn default_routing_profile() -> String {

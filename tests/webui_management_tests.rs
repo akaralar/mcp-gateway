@@ -44,10 +44,7 @@ use mcp_gateway::security::{ToolPolicy, ToolPolicyConfig};
 /// Build a minimal `AppState` suitable for unit-testing the UI management
 /// endpoints.  Auth is disabled so `is_admin()` returns `true` for all
 /// requests (anonymous == admin when auth is off).
-fn make_app_state(
-    cap_dir: Option<&str>,
-    config_path: Option<std::path::PathBuf>,
-) -> Arc<AppState> {
+fn make_app_state(cap_dir: Option<&str>, config_path: Option<std::path::PathBuf>) -> Arc<AppState> {
     let config = Config::default();
     let backends = Arc::new(BackendRegistry::new());
     let multiplexer = Arc::new(NotificationMultiplexer::new(
@@ -69,9 +66,7 @@ fn make_app_state(
 
     let meta_mcp = Arc::new(MetaMcp::new(Arc::clone(&backends)));
 
-    let capability_dirs = cap_dir
-        .map(|d| vec![d.to_string()])
-        .unwrap_or_default();
+    let capability_dirs = cap_dir.map(|d| vec![d.to_string()]).unwrap_or_default();
 
     Arc::new(AppState {
         backends,
@@ -217,8 +212,13 @@ async fn test_registry_search_filters_results() {
     let router = create_router(state);
 
     // WHEN: GET /ui/api/registry/search?q=tavily
-    let (status, body) =
-        send_json(&router, Method::GET, "/ui/api/registry/search?q=tavily", None).await;
+    let (status, body) = send_json(
+        &router,
+        Method::GET,
+        "/ui/api/registry/search?q=tavily",
+        None,
+    )
+    .await;
 
     // THEN: 200 with matching results
     assert_eq!(status, StatusCode::OK, "Expected 200, got: {body}");
@@ -518,7 +518,10 @@ async fn test_capability_create_read_delete_lifecycle() {
         .get("content-type")
         .and_then(|v: &axum::http::HeaderValue| v.to_str().ok())
         .unwrap_or("");
-    assert!(ct.contains("yaml"), "Content-Type should be yaml, got: {ct}");
+    assert!(
+        ct.contains("yaml"),
+        "Content-Type should be yaml, got: {ct}"
+    );
 
     // WHEN: DELETE /ui/api/capabilities/test-cap
     let (del_status, del_body) = send_json(
@@ -554,8 +557,10 @@ async fn test_capability_put_updates_content() {
     let router = create_router(state);
 
     // WHEN: PUT /ui/api/capabilities/updatable with updated YAML
-    let updated_yaml =
-        VALID_YAML.replace("Test capability for integration tests", "Updated description");
+    let updated_yaml = VALID_YAML.replace(
+        "Test capability for integration tests",
+        "Updated description",
+    );
     let (put_status, put_body) = send_raw(
         &router,
         Method::PUT,
@@ -592,10 +597,10 @@ async fn test_capability_path_traversal_rejected() {
     // Note: names with '/' can't be tested via URL (axum routes treat '/' as path
     // separator). We test names with '.', '@', uppercase, spaces (URL-encoded), etc.
     let invalid_names = [
-        "foo.bar",       // dot not allowed
-        "UPPERCASE",     // uppercase not allowed
-        "foo%40bar",     // '@' URL-encoded
-        "foo%20bar",     // space URL-encoded
+        "foo.bar",   // dot not allowed
+        "UPPERCASE", // uppercase not allowed
+        "foo%40bar", // '@' URL-encoded
+        "foo%20bar", // space URL-encoded
     ];
     for name in invalid_names {
         let uri = format!("/ui/api/capabilities/{name}");
@@ -781,14 +786,14 @@ async fn test_import_inline_spec_creates_yaml_files() {
                 .unwrap_or(false)
         })
         .collect();
-    assert!(
-        !files.is_empty(),
-        "Import should create YAML files on disk"
-    );
+    assert!(!files.is_empty(), "Import should create YAML files on disk");
 
     // AND: errors list is empty
     let errors = body["errors"].as_array().expect("errors must be array");
-    assert!(errors.is_empty(), "Import should have no errors: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "Import should have no errors: {errors:?}"
+    );
 }
 
 #[tokio::test]

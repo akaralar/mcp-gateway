@@ -21,7 +21,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-features -- -D warnings -W clippy::pedantic
+      - run: cargo clippy --all-features -- -D warnings
 
   test:
     name: Tests

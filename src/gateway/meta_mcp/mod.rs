@@ -20,6 +20,10 @@ use crate::cache::ResponseCache;
 use crate::capability::CapabilityBackend;
 use crate::config_reload::ReloadContext;
 use crate::cost_accounting::CostTracker;
+#[cfg(feature = "cost-governance")]
+use crate::cost_accounting::enforcer::BudgetEnforcer;
+#[cfg(feature = "cost-governance")]
+use crate::cost_accounting::registry::CostRegistry;
 use crate::idempotency::{IdempotencyCache, spawn_cleanup_task};
 use crate::kill_switch::{CapabilityErrorBudgetConfig, ErrorBudgetConfig, KillSwitch};
 use crate::playbook::PlaybookEngine;
@@ -77,6 +81,15 @@ pub struct MetaMcp {
     /// When `Some`, exact tool lookups short-circuit fuzzy search, and schema
     /// prefetching is triggered after each `gateway_invoke`.
     pub(super) tool_registry: Option<std::sync::Arc<ToolRegistry>>,
+    /// Cost governance: pre-invoke budget enforcement engine (feature-gated).
+    ///
+    /// `None` when the `cost-governance` feature is disabled OR when the
+    /// `cost_governance.enabled` config flag is `false`.
+    #[cfg(feature = "cost-governance")]
+    pub(crate) budget_enforcer: Option<Arc<BudgetEnforcer>>,
+    /// Cost governance: tool-cost registry used by enforcer and suggestions.
+    #[cfg(feature = "cost-governance")]
+    pub(crate) cost_registry: Option<Arc<CostRegistry>>,
 }
 
 // ============================================================================
@@ -109,6 +122,10 @@ impl MetaMcp {
             secret_injector: crate::secret_injection::SecretInjector::empty(),
             cost_tracker: Arc::new(CostTracker::new()),
             tool_registry: None,
+            #[cfg(feature = "cost-governance")]
+            budget_enforcer: None,
+            #[cfg(feature = "cost-governance")]
+            cost_registry: None,
         }
     }
 
@@ -142,6 +159,10 @@ impl MetaMcp {
             secret_injector: crate::secret_injection::SecretInjector::empty(),
             cost_tracker: Arc::new(CostTracker::new()),
             tool_registry: None,
+            #[cfg(feature = "cost-governance")]
+            budget_enforcer: None,
+            #[cfg(feature = "cost-governance")]
+            cost_registry: None,
         }
     }
 
@@ -239,6 +260,21 @@ impl MetaMcp {
     #[allow(dead_code)]
     pub fn with_tool_registry(mut self, registry: std::sync::Arc<ToolRegistry>) -> Self {
         self.tool_registry = Some(registry);
+        self
+    }
+
+    /// Attach cost-governance enforcer and registry (consuming builder).
+    ///
+    /// Called from `server.rs` when `cost_governance.enabled = true`.
+    #[cfg(feature = "cost-governance")]
+    #[must_use]
+    pub fn with_cost_governance(
+        mut self,
+        enforcer: Arc<BudgetEnforcer>,
+        registry: Arc<CostRegistry>,
+    ) -> Self {
+        self.budget_enforcer = Some(enforcer);
+        self.cost_registry = Some(registry);
         self
     }
 

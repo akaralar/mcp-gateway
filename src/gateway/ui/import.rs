@@ -13,8 +13,8 @@ use std::sync::Arc;
 use axum::extract::{Extension, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{Json, Router};
 use axum::routing::post;
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -118,10 +118,7 @@ async fn preview_handler(
         }
     };
 
-    let tools: Vec<ToolPreview> = caps
-        .iter()
-        .map(tool_preview_from_cap)
-        .collect();
+    let tools: Vec<ToolPreview> = caps.iter().map(tool_preview_from_cap).collect();
 
     (StatusCode::OK, Json(json!({"tools": tools}))).into_response()
 }
@@ -241,10 +238,7 @@ async fn resolve_spec(
 }
 
 /// Fetch an `OpenAPI` spec from a remote URL.
-async fn fetch_spec(
-    url: &str,
-    ssrf_protection: bool,
-) -> Result<String, (StatusCode, String)> {
+async fn fetch_spec(url: &str, ssrf_protection: bool) -> Result<String, (StatusCode, String)> {
     // Validate URL is well-formed.
     let parsed = url::Url::parse(url).map_err(|e| {
         (
@@ -450,7 +444,10 @@ paths:
         let caps = parse_spec(PETSTORE_SPEC).expect("should parse");
         assert_eq!(caps.len(), 2);
         let names: Vec<_> = caps.iter().map(|c| c.name.as_str()).collect();
-        assert!(names.contains(&"listpets"), "expected listpets, got {names:?}");
+        assert!(
+            names.contains(&"listpets"),
+            "expected listpets, got {names:?}"
+        );
         assert!(names.contains(&"getpet"), "expected getpet, got {names:?}");
     }
 
@@ -465,13 +462,19 @@ paths:
     #[test]
     fn tool_preview_extracts_method_and_path() {
         let caps = parse_spec(PETSTORE_SPEC).expect("should parse");
-        let getpet = caps.iter().find(|c| c.name == "getpet").expect("getpet missing");
+        let getpet = caps
+            .iter()
+            .find(|c| c.name == "getpet")
+            .expect("getpet missing");
         let preview = tool_preview_from_cap(getpet);
 
         assert_eq!(preview.name, "getpet");
         assert_eq!(preview.method, "GET");
         assert_eq!(preview.path, "/pets/{petId}");
-        assert!(!preview.description.is_empty(), "description should not be empty");
+        assert!(
+            !preview.description.is_empty(),
+            "description should not be empty"
+        );
     }
 
     #[test]

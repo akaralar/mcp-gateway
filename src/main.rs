@@ -11,7 +11,7 @@ use clap::Parser;
 use tracing::{error, info};
 
 use mcp_gateway::{
-    cli::{Cli, Command, PluginCommand},
+    cli::{Cli, Command, PluginCommand, SetupCommand},
     config::Config,
     gateway::Gateway,
     setup_tracing,
@@ -61,11 +61,20 @@ async fn main() -> ExitCode {
         Some(Command::Plugin(plugin_cmd)) => {
             run_plugin_command(plugin_cmd, config_path.as_deref()).await
         }
-        Some(Command::Setup {
+        Some(Command::Setup(SetupCommand::Wizard {
             yes,
             output,
             configure_client,
-        }) => commands::run_setup_command(yes, &output, configure_client).await,
+        })) => commands::run_setup_command(yes, &output, configure_client).await,
+        #[cfg(feature = "config-export")]
+        Some(Command::Setup(SetupCommand::Export {
+            target,
+            mode,
+            name,
+            watch,
+            dry_run,
+            config,
+        })) => commands::run_config_export(target, mode, &name, watch, dry_run, &config).await,
         Some(Command::Add {
             name,
             command,

@@ -20,6 +20,12 @@ use crate::cache::ResponseCache;
 use crate::capability::{CapabilityBackend, CapabilityExecutor, CapabilityWatcher};
 use crate::config::Config;
 use crate::config_reload::{ConfigWatcher, LiveConfig, ReloadContext};
+#[cfg(feature = "cost-governance")]
+use crate::cost_accounting::{
+    enforcer::BudgetEnforcer,
+    persistence::{self, PersistedCosts},
+    registry::CostRegistry,
+};
 use crate::key_server::{KeyServer, store::spawn_reaper};
 use crate::mtls::MtlsPolicy;
 use crate::playbook::PlaybookEngine;
@@ -207,19 +213,53 @@ impl Gateway {
         let secret_injector =
             crate::secret_injection::SecretInjector::from_backend_configs(&self.config.backends);
 
+        // Resolve cost-governance data directory (shared with ranker/transitions)
+        #[cfg_attr(not(feature = "cost-governance"), allow(unused_variables))]
+        let data_dir = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".mcp-gateway");
+
+        // Build cost governance components if feature + config enabled
+        #[cfg(feature = "cost-governance")]
+        let (cost_registry_opt, budget_enforcer_opt) = {
+            let cg_cfg = self.config.cost_governance.clone();
+            if cg_cfg.enabled {
+                let registry = Arc::new(CostRegistry::new(&cg_cfg));
+                let costs_path = data_dir.join("costs.json");
+                if costs_path.exists() {
+                    match persistence::load(&costs_path) {
+                        Ok(_persisted) => info!("Loaded persisted cost data"),
+                        Err(e) => warn!(error = %e, "Failed to load persisted cost data"),
+                    }
+                }
+                let enforcer = Arc::new(BudgetEnforcer::new(cg_cfg, Arc::clone(&registry)));
+                info!("Cost governance enabled");
+                (Some(registry), Some(enforcer))
+            } else {
+                (None, None)
+            }
+        };
+
         // Create app state with cache, stats, and ranking support
-        let meta_mcp = Arc::new(
-            MetaMcp::with_features(
-                Arc::clone(&self.backends),
-                cache,
-                usage_stats,
-                Some(ranker),
-                self.config.cache.default_ttl,
-            )
-            .with_profile_registry(profile_registry)
-            .with_code_mode(self.config.code_mode.enabled)
-            .with_secret_injector(secret_injector),
-        );
+        #[allow(unused_mut)]
+        let mut meta_mcp_builder = MetaMcp::with_features(
+            Arc::clone(&self.backends),
+            cache,
+            usage_stats,
+            Some(ranker),
+            self.config.cache.default_ttl,
+        )
+        .with_profile_registry(profile_registry)
+        .with_code_mode(self.config.code_mode.enabled)
+        .with_secret_injector(secret_injector);
+
+        // Attach cost governance if enabled
+        #[cfg(feature = "cost-governance")]
+        if let (Some(registry), Some(enforcer)) = (cost_registry_opt, budget_enforcer_opt) {
+            meta_mcp_builder = meta_mcp_builder.with_cost_governance(enforcer, registry);
+        }
+
+        let meta_mcp = Arc::new(meta_mcp_builder);
 
         // Attach transition tracker for predictive tool prefetch
         meta_mcp.set_transition_tracker(transition_tracker);
@@ -424,6 +464,10 @@ impl Gateway {
                 })
             }
         });
+
+        // Keep a clone of meta_mcp for post-shutdown operations (periodic
+        // persistence and graceful shutdown cost saves use this handle).
+        let meta_mcp_for_shutdown = Arc::clone(&meta_mcp);
 
         let state = Arc::new(AppState {
             backends: Arc::clone(&self.backends),
@@ -633,6 +677,35 @@ impl Gateway {
             }
         });
 
+        // Spawn periodic cost-governance persistence (every 5 minutes)
+        #[cfg(feature = "cost-governance")]
+        if let Some(ref enforcer) = meta_mcp_for_shutdown.budget_enforcer {
+            let enforcer_persist = Arc::clone(enforcer);
+            let costs_path_periodic = data_dir.join("costs.json");
+            let mut shutdown_rx_costs = shutdown_tx.subscribe();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+                // Skip first immediate tick (don't save before any spend occurs)
+                interval.tick().await;
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let snap = enforcer_persist.snapshot();
+                            let persisted = build_persisted_costs(&snap);
+                            if let Err(e) = persistence::save(&costs_path_periodic, &persisted) {
+                                warn!(error = %e, "Periodic cost persistence failed");
+                            } else {
+                                debug!("Periodic cost data saved");
+                            }
+                        }
+                        _ = shutdown_rx_costs.recv() => {
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
         // Run server — plain HTTP or mTLS depending on config
         if self.config.mtls.enabled {
             serve_tls(app, addr, &self.config.mtls, shutdown_signal(shutdown_tx)).await?;
@@ -655,6 +728,19 @@ impl Gateway {
             warn!(error = %e, "Failed to save transition tracking data");
         } else {
             info!("Saved transition tracking data");
+        }
+
+        // Save cost governance data on graceful shutdown
+        #[cfg(feature = "cost-governance")]
+        if let Some(ref enforcer) = meta_mcp_for_shutdown.budget_enforcer {
+            let costs_path = data_dir.join("costs.json");
+            let snap = enforcer.snapshot();
+            let persisted = build_persisted_costs(&snap);
+            if let Err(e) = persistence::save(&costs_path, &persisted) {
+                warn!(error = %e, "Failed to save cost data on shutdown");
+            } else {
+                info!("Saved cost governance data");
+            }
         }
 
         // Graceful drain: wait for in-flight requests to complete.
@@ -687,6 +773,35 @@ impl Gateway {
         self.backends.stop_all().await;
 
         Ok(())
+    }
+}
+
+/// Build a `PersistedCosts` snapshot from the current enforcer state.
+#[cfg(feature = "cost-governance")]
+fn build_persisted_costs(
+    snap: &crate::cost_accounting::enforcer::EnforcerSnapshot,
+) -> PersistedCosts {
+    use crate::cost_accounting::persistence::ToolTotal;
+
+    let tool_totals = snap
+        .tool_daily
+        .iter()
+        .map(|(name, &daily_usd)| {
+            (
+                name.clone(),
+                ToolTotal {
+                    call_count: 0,
+                    total_cost_usd: daily_usd,
+                    avg_cost_usd: 0.0,
+                },
+            )
+        })
+        .collect();
+
+    PersistedCosts {
+        saved_at: crate::cost_accounting::persistence::now_secs(),
+        tool_totals,
+        key_totals: snap.key_daily.clone(),
     }
 }
 

@@ -36,6 +36,46 @@ use clap_complete::Shell;
 
 use crate::cli::output::OutputFormat;
 
+// ── Config-export CLI types ───────────────────────────────────────────────────
+// Defined here (library crate) so both the CLI parser and the binary-only
+// `commands/config_export.rs` can share the same type definitions.
+
+/// Connection mode for the exported client config entry.
+#[cfg(feature = "config-export")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ConnectionMode {
+    /// HTTP proxy mode: client connects to the running gateway's HTTP endpoint.
+    Proxy,
+    /// Stdio mode: client spawns `mcp-gateway serve --stdio` as a subprocess.
+    Stdio,
+    /// Auto-detect: probe the health endpoint first; fall back to stdio, then proxy.
+    Auto,
+}
+
+/// Target AI client for config export.
+#[cfg(feature = "config-export")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ExportTarget {
+    /// Claude Code (`~/.claude.json`)
+    ClaudeCode,
+    /// Claude Desktop (platform-specific path)
+    ClaudeDesktop,
+    /// Cursor (`.cursor/mcp.json`, workspace-relative)
+    Cursor,
+    /// VS Code Copilot (`.vscode/mcp.json`, workspace-relative)
+    VsCodeCopilot,
+    /// Windsurf (`~/.codeium/windsurf/mcp_config.json`)
+    Windsurf,
+    /// Cline (`.cline/mcp_servers.json`, workspace-relative)
+    Cline,
+    /// Zed (`~/.config/zed/settings.json`)
+    Zed,
+    /// Generic: write to stdout
+    Generic,
+    /// All supported clients
+    All,
+}
+
 /// Universal MCP Gateway - single-port multiplexing for MCP servers and REST APIs
 ///
 /// Aggregates multiple MCP backends and REST capability definitions behind one
@@ -167,26 +207,13 @@ pub enum Command {
     #[command(subcommand, about = "Plugin marketplace management")]
     Plugin(PluginCommand),
 
-    /// Interactive setup wizard — scan AI clients and import MCP servers
+    /// Setup wizard and config export — import MCP servers or export gateway config
     ///
-    /// Scans Claude Desktop, Claude Code, Cursor, Zed, Continue.dev, Codex and
-    /// running processes for existing MCP servers, lets you pick which ones to
-    /// import into the gateway config, and optionally writes the gateway entry
-    /// back into each AI client so they point at the gateway instead.
-    #[command(about = "Interactive setup wizard — import existing MCP servers")]
-    Setup {
-        /// Skip all interactive prompts and import every discovered server
-        #[arg(long)]
-        yes: bool,
-
-        /// Path to write (or update) the gateway configuration file
-        #[arg(short, long, default_value = "gateway.yaml")]
-        output: PathBuf,
-
-        /// Also write the gateway URL into each detected AI client config
-        #[arg(long)]
-        configure_client: bool,
-    },
+    /// Two sub-modes:
+    ///   `setup wizard`  — scan AI clients and import MCP servers into gateway.yaml
+    ///   `setup export`  — write gateway config into AI client config files
+    #[command(subcommand, about = "Setup wizard and config export")]
+    Setup(SetupCommand),
 
     /// Add an MCP backend to the gateway configuration
     ///
@@ -290,6 +317,83 @@ pub enum Command {
         /// Gateway config file to inspect (auto-detected when omitted)
         #[arg(short, long)]
         config: Option<PathBuf>,
+    },
+}
+
+/// Setup subcommands: interactive import wizard or config export.
+#[derive(Subcommand, Debug)]
+pub enum SetupCommand {
+    /// Interactive setup wizard — scan AI clients and import MCP servers
+    ///
+    /// Scans Claude Desktop, Claude Code, Cursor, Zed, Continue.dev, Codex and
+    /// running processes for existing MCP servers, lets you pick which ones to
+    /// import into the gateway config, and optionally writes the gateway entry
+    /// back into each AI client so they point at the gateway instead.
+    #[command(about = "Interactive setup wizard — import existing MCP servers")]
+    Wizard {
+        /// Skip all interactive prompts and import every discovered server
+        #[arg(long)]
+        yes: bool,
+
+        /// Path to write (or update) the gateway configuration file
+        #[arg(short, long, default_value = "gateway.yaml")]
+        output: PathBuf,
+
+        /// Also write the gateway URL into each detected AI client config
+        #[arg(long)]
+        configure_client: bool,
+    },
+
+    /// Export gateway.yaml as client-native MCP config files
+    ///
+    /// Generates JSON config entries for AI clients (Claude Code, Cursor, VS Code
+    /// Copilot, Windsurf, Cline, Zed, Claude Desktop) from the single gateway.yaml.
+    /// Supports HTTP proxy and stdio subprocess modes with auto-detection.
+    ///
+    /// # Examples
+    ///
+    /// ```bash
+    /// # Export to all detected clients (auto-detect mode)
+    /// mcp-gateway setup export --target all
+    ///
+    /// # Export only for Claude Code in stdio mode
+    /// mcp-gateway setup export --target claude-code --mode stdio
+    ///
+    /// # Export in proxy mode with custom entry name
+    /// mcp-gateway setup export --target all --mode proxy --name my-gateway
+    ///
+    /// # Watch for config changes and auto-regenerate all client configs
+    /// mcp-gateway setup export --target all --watch
+    ///
+    /// # Dry-run: show what would be written without writing
+    /// mcp-gateway setup export --target all --dry-run
+    /// ```
+    #[cfg(feature = "config-export")]
+    #[command(about = "Generate client-specific MCP config files from gateway.yaml")]
+    Export {
+        /// Target client(s) to export for
+        #[arg(short, long, default_value = "all", value_enum)]
+        target: ExportTarget,
+
+        /// Connection mode: proxy (HTTP URL), stdio (subprocess), or auto-detect
+        #[arg(short, long, default_value = "auto", value_enum)]
+        mode: ConnectionMode,
+
+        /// Name for the gateway entry in client configs
+        #[arg(short, long, default_value = "gateway")]
+        name: String,
+
+        /// Watch gateway.yaml for changes and auto-regenerate all client configs
+        #[arg(short, long)]
+        watch: bool,
+
+        /// Show what would be written without actually writing anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Gateway config file to read
+        #[arg(short, long, default_value = "gateway.yaml")]
+        config: PathBuf,
     },
 }
 
