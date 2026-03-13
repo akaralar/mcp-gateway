@@ -53,9 +53,13 @@ pub mod scheduler;
 pub mod secret_injection;
 pub mod secrets;
 pub mod security;
+#[cfg(feature = "semantic-search")]
+pub mod semantic_search;
 pub mod session_sandbox;
 pub mod simhash;
 pub mod stats;
+#[cfg(feature = "tool-profiles")]
+pub mod tool_profiles;
 pub mod tool_registry;
 pub mod tracing_context;
 pub mod transform;

@@ -1,6 +1,6 @@
 [package]
 name = "mcp-gateway"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Mikko Parkkola <mikko.parkkola@iki.fi>"]
@@ -114,12 +114,14 @@ serde_urlencoded = "0.7"
 criterion = { version = "0.7.0", features = ["html_reports"] }
 
 [features]
-default = ["webui", "config-export", "cost-governance", "firewall", "discovery"]
+default = ["webui", "config-export", "cost-governance", "firewall", "discovery", "semantic-search", "tool-profiles"]
 webui = []
 config-export = []
 cost-governance = []
 firewall = []
 discovery = []
+semantic-search = []
+tool-profiles = []
 metrics = ["dep:metrics-exporter-prometheus"]
 
 [[bin]]
