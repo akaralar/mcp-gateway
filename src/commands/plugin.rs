@@ -104,7 +104,7 @@ pub async fn run_plugin_uninstall(
     let dir = plugin_dir
         .map_or_else(|| resolved_plugin_dir(None, &config.marketplace), Path::to_path_buf);
 
-    match MarketplaceClient::uninstall(name, &dir).await {
+    match MarketplaceClient::uninstall(name, &dir) {
         Ok(()) => {
             // Also remove from persistent registry if it exists.
             if let Ok(mut reg) = PluginRegistry::open(&dir) {
