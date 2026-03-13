@@ -2,13 +2,19 @@
 //!
 //! `add` creates a new backend entry in gateway.yaml, optionally bootstrapped
 //! from the built-in server registry.  `remove` deletes an existing entry.
+//!
+//! All core logic is delegated to [`mcp_gateway::gateway::ui::backend_ops`],
+//! which provides `Result<T>` functions usable from both CLI and HTTP handlers.
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 
 use mcp_gateway::{
-    config::{BackendConfig, Config, TransportConfig},
+    config::TransportConfig,
+    gateway::ui::backend_ops::{
+        self, add_backend, get_backend, list_backends, parse_env_vars, remove_backend,
+        resolve_transport, update_backend, write_config, BackendUpdate,
+    },
     registry::server_registry,
 };
 
@@ -51,27 +57,13 @@ pub async fn run_add_command(
     };
 
     // ── Load config ────────────────────────────────────────────────────────
-    let mut gateway_config = load_config(config);
-
-    if gateway_config.backends.contains_key(name) {
-        eprintln!(
-            "Error: Backend '{}' already exists in {}. Remove it first.",
-            name,
-            config.display()
-        );
-        return ExitCode::FAILURE;
-    }
+    let mut gateway_config = backend_ops::load_config_or_default(config);
 
     // ── Insert backend ─────────────────────────────────────────────────────
-    let backend = BackendConfig {
-        description: description.clone(),
-        enabled: true,
-        transport: transport.clone(),
-        env: env.clone(),
-        ..Default::default()
-    };
-
-    gateway_config.backends.insert(name.to_string(), backend);
+    if let Err(msg) = add_backend(&mut gateway_config, name, transport.clone(), description, env.clone()) {
+        eprintln!("Error: {msg} (in {})", config.display());
+        return ExitCode::FAILURE;
+    }
 
     // ── Write config ───────────────────────────────────────────────────────
     if let Err(e) = write_config(config, &gateway_config) {
@@ -84,7 +76,7 @@ pub async fn run_add_command(
         TransportConfig::Stdio { .. } => "stdio",
         TransportConfig::Http { .. } => "http",
     };
-    println!("Added '{}' ({transport_label}).", name);
+    println!("Added '{name}' ({transport_label}).");
 
     if let Some(entry) = server_registry::lookup(name) {
         report_env_status(entry.required_env, &env);
@@ -93,74 +85,11 @@ pub async fn run_add_command(
     ExitCode::SUCCESS
 }
 
-/// Determine transport and description from explicit flags or registry.
-fn resolve_transport(
-    name: &str,
-    cmd: Option<&str>,
-    url: Option<&str>,
-    desc: Option<&str>,
-) -> Result<(TransportConfig, String), String> {
-    // Explicit command takes priority.
-    if let Some(command) = cmd {
-        return Ok((
-            TransportConfig::Stdio {
-                command: command.to_string(),
-                cwd: None,
-                protocol_version: None,
-            },
-            desc.unwrap_or("").to_string(),
-        ));
-    }
-
-    // Explicit URL.
-    if let Some(http_url) = url {
-        return Ok((
-            TransportConfig::Http {
-                http_url: http_url.to_string(),
-                streamable_http: false,
-                protocol_version: None,
-            },
-            desc.unwrap_or("").to_string(),
-        ));
-    }
-
-    // Registry lookup.
-    if let Some(entry) = server_registry::lookup(name) {
-        let transport = match entry.transport {
-            server_registry::Transport::Stdio => TransportConfig::Stdio {
-                command: entry.command.to_string(),
-                cwd: None,
-                protocol_version: None,
-            },
-            server_registry::Transport::Http { default_url } => TransportConfig::Http {
-                http_url: default_url.to_string(),
-                streamable_http: false,
-                protocol_version: None,
-            },
-        };
-        return Ok((transport, desc.unwrap_or(entry.description).to_string()));
-    }
-
-    Err(format!(
-        "'{}' is not in the built-in registry. Provide --command or --url.",
-        name
-    ))
-}
-
-/// Parse a slice of `KEY=VALUE` strings into a `HashMap`.
-fn parse_env_vars(env_vars: &[String]) -> Result<HashMap<String, String>, String> {
-    env_vars
-        .iter()
-        .map(|kv| {
-            kv.split_once('=')
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .ok_or_else(|| format!("Invalid --env value '{kv}': expected KEY=VALUE"))
-        })
-        .collect()
-}
-
 /// Print which required env vars are set and which are missing.
-fn report_env_status(required: &[&str], provided_env: &HashMap<String, String>) {
+fn report_env_status(
+    required: &[&str],
+    provided_env: &std::collections::HashMap<String, String>,
+) {
     for key in required {
         let set_in_env = std::env::var(key).is_ok();
         let set_in_config = provided_env.contains_key(*key);
@@ -177,14 +106,10 @@ fn report_env_status(required: &[&str], provided_env: &HashMap<String, String>) 
 
 /// Run `mcp-gateway remove`.
 pub fn run_remove_command(name: &str, config: &Path) -> ExitCode {
-    let mut gateway_config = load_config(config);
+    let mut gateway_config = backend_ops::load_config_or_default(config);
 
-    if gateway_config.backends.remove(name).is_none() {
-        eprintln!(
-            "Error: Backend '{}' not found in {}.",
-            name,
-            config.display()
-        );
+    if let Err(msg) = remove_backend(&mut gateway_config, name) {
+        eprintln!("Error: {msg} (in {})", config.display());
         return ExitCode::FAILURE;
     }
 
@@ -201,7 +126,7 @@ pub fn run_remove_command(name: &str, config: &Path) -> ExitCode {
 
 /// Run `mcp-gateway list`.
 pub fn run_list_command(json: bool, config: &Path) -> ExitCode {
-    let gateway_config = load_config(config);
+    let gateway_config = backend_ops::load_config_or_default(config);
 
     if gateway_config.backends.is_empty() {
         if json {
@@ -212,41 +137,27 @@ pub fn run_list_command(json: bool, config: &Path) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    let backends = list_backends(&gateway_config);
+
     if json {
-        let entries: Vec<serde_json::Value> = gateway_config
-            .backends
-            .iter()
-            .map(|(name, backend)| {
-                serde_json::json!({
-                    "name": name,
-                    "transport": format_transport(&backend.transport),
-                    "description": &backend.description,
-                    "enabled": backend.enabled,
-                })
-            })
-            .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&entries).unwrap_or_default()
+            serde_json::to_string_pretty(&backends).unwrap_or_default()
         );
     } else {
         println!(
             "{} backend(s) in {}:\n",
-            gateway_config.backends.len(),
+            backends.len(),
             config.display()
         );
-        let mut names: Vec<_> = gateway_config.backends.keys().collect();
-        names.sort();
-        for name in names {
-            let backend = &gateway_config.backends[name];
-            let transport = format_transport(&backend.transport);
-            let desc = if backend.description.is_empty() {
+        for info in &backends {
+            let desc = if info.description.is_empty() {
                 "(no description)"
             } else {
-                &backend.description
+                &info.description
             };
-            let enabled = if backend.enabled { "" } else { " [disabled]" };
-            println!("  {name} ({transport}){enabled}");
+            let enabled = if info.enabled { "" } else { " [disabled]" };
+            println!("  {} ({}){enabled}", info.name, info.transport);
             println!("    {desc}");
         }
     }
@@ -257,37 +168,34 @@ pub fn run_list_command(json: bool, config: &Path) -> ExitCode {
 
 /// Run `mcp-gateway get`.
 pub fn run_get_command(name: &str, config: &Path) -> ExitCode {
-    let gateway_config = load_config(config);
+    let gateway_config = backend_ops::load_config_or_default(config);
 
-    let Some(backend) = gateway_config.backends.get(name) else {
-        eprintln!(
-            "Error: Backend '{}' not found in {}.",
-            name,
-            config.display()
-        );
-        return ExitCode::FAILURE;
+    let info = match get_backend(&gateway_config, name) {
+        Ok(i) => i,
+        Err(msg) => {
+            eprintln!("Error: {msg} (in {})", config.display());
+            return ExitCode::FAILURE;
+        }
     };
 
     println!("Name:        {name}");
-    println!("Transport:   {}", format_transport(&backend.transport));
+    println!("Transport:   {}", info.transport);
     println!(
         "Description: {}",
-        if backend.description.is_empty() { "(none)" } else { &backend.description }
+        if info.description.is_empty() { "(none)" } else { &info.description }
     );
-    println!("Enabled:     {}", backend.enabled);
+    println!("Enabled:     {}", info.enabled);
 
-    match &backend.transport {
-        TransportConfig::Stdio { command, .. } => {
-            println!("Command:     {command}");
-        }
-        TransportConfig::Http { http_url, .. } => {
-            println!("URL:         {http_url}");
-        }
+    if let Some(cmd) = &info.command {
+        println!("Command:     {cmd}");
+    }
+    if let Some(url) = &info.url {
+        println!("URL:         {url}");
     }
 
-    if !backend.env.is_empty() {
+    if !info.env.is_empty() {
         println!("Environment:");
-        for (k, v) in &backend.env {
+        for (k, v) in &info.env {
             println!("  {k}={v}");
         }
     }
@@ -295,30 +203,21 @@ pub fn run_get_command(name: &str, config: &Path) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn format_transport(t: &TransportConfig) -> &'static str {
-    match t {
-        TransportConfig::Stdio { .. } => "stdio",
-        TransportConfig::Http { .. } => "http",
-    }
-}
+// ── update (used by HTTP handler, not yet wired to a CLI verb) ────────────────
 
-// ── Shared helpers ─────────────────────────────────────────────────────────────
-
-fn load_config(path: &Path) -> Config {
-    if path.exists() {
-        Config::load(Some(path)).unwrap_or_else(|e| {
-            eprintln!("Warning: Could not load config ({e}); using defaults.");
-            Config::default()
-        })
-    } else {
-        Config::default()
-    }
-}
-
-fn write_config(path: &Path, config: &Config) -> Result<(), String> {
-    let yaml =
-        serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-    std::fs::write(path, yaml).map_err(|e| e.to_string())
+/// Run a programmatic partial update on a backend (no `ExitCode` wrapper).
+///
+/// Exposed here so the CLI layer has a thin wrapper if needed later.
+/// Will be called from HTTP handlers in Task 1.2.
+#[allow(dead_code)]
+pub fn run_update_backend(
+    name: &str,
+    update: BackendUpdate,
+    config: &Path,
+) -> Result<(), String> {
+    let mut gateway_config = backend_ops::load_config_or_default(config);
+    update_backend(&mut gateway_config, name, update)?;
+    write_config(config, &gateway_config)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -326,85 +225,13 @@ fn write_config(path: &Path, config: &Config) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mcp_gateway::config::{Config, TransportConfig};
     use tempfile::TempDir;
 
     fn temp_config() -> (TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gateway.yaml");
         (dir, path)
-    }
-
-    // ── parse_env_vars ────────────────────────────────────────────────────────
-
-    #[test]
-    fn parse_env_vars_valid_pairs_returns_map() {
-        let vars = vec!["KEY=value".to_string(), "FOO=bar".to_string()];
-        let map = parse_env_vars(&vars).unwrap();
-        assert_eq!(map["KEY"], "value");
-        assert_eq!(map["FOO"], "bar");
-    }
-
-    #[test]
-    fn parse_env_vars_value_contains_equals_keeps_full_value() {
-        let vars = vec!["URL=http://host:80/path?a=b".to_string()];
-        let map = parse_env_vars(&vars).unwrap();
-        assert_eq!(map["URL"], "http://host:80/path?a=b");
-    }
-
-    #[test]
-    fn parse_env_vars_missing_equals_returns_error() {
-        let vars = vec!["NOEQUALS".to_string()];
-        assert!(parse_env_vars(&vars).is_err());
-    }
-
-    #[test]
-    fn parse_env_vars_empty_slice_returns_empty_map() {
-        let map = parse_env_vars(&[]).unwrap();
-        assert!(map.is_empty());
-    }
-
-    // ── resolve_transport ─────────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_transport_explicit_command_takes_priority() {
-        let (transport, _) = resolve_transport("tavily", Some("my-cmd"), None, None).unwrap();
-        match transport {
-            TransportConfig::Stdio { command, .. } => assert_eq!(command, "my-cmd"),
-            _ => panic!("expected Stdio"),
-        }
-    }
-
-    #[test]
-    fn resolve_transport_explicit_url() {
-        let (transport, _) =
-            resolve_transport("custom", None, Some("http://localhost:9000"), None).unwrap();
-        match transport {
-            TransportConfig::Http { http_url, .. } => {
-                assert_eq!(http_url, "http://localhost:9000");
-            }
-            _ => panic!("expected Http"),
-        }
-    }
-
-    #[test]
-    fn resolve_transport_registry_lookup_for_known_name() {
-        let (transport, description) = resolve_transport("tavily", None, None, None).unwrap();
-        match transport {
-            TransportConfig::Stdio { command, .. } => {
-                assert!(command.contains("tavily"), "command should contain tavily");
-            }
-            _ => panic!("expected Stdio for tavily"),
-        }
-        assert!(
-            !description.is_empty(),
-            "registry description must not be empty"
-        );
-    }
-
-    #[test]
-    fn resolve_transport_unknown_name_without_flags_returns_error() {
-        let result = resolve_transport("totally-unknown-server-xyz", None, None, None);
-        assert!(result.is_err());
     }
 
     // ── add round-trip ────────────────────────────────────────────────────────
@@ -510,5 +337,67 @@ mod tests {
             }
             _ => panic!("expected Http transport"),
         }
+    }
+
+    // ── get command ───────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_existing_backend_returns_success() {
+        let (_dir, path) = temp_config();
+        run_add_command("tavily", None, None, None, &[], &path).await;
+        let code = run_get_command("tavily", &path);
+        assert_eq!(code, ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn get_missing_backend_returns_failure() {
+        let (_dir, path) = temp_config();
+        let code = run_get_command("ghost", &path);
+        assert_eq!(code, ExitCode::FAILURE);
+    }
+
+    // ── list command ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_returns_success_when_empty() {
+        let (_dir, path) = temp_config();
+        let code = run_list_command(false, &path);
+        assert_eq!(code, ExitCode::SUCCESS);
+    }
+
+    #[tokio::test]
+    async fn list_json_returns_success_with_backends() {
+        let (_dir, path) = temp_config();
+        run_add_command("tavily", None, None, None, &[], &path).await;
+        let code = run_list_command(true, &path);
+        assert_eq!(code, ExitCode::SUCCESS);
+    }
+
+    // ── run_update_backend ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_existing_backend_succeeds() {
+        let (_dir, path) = temp_config();
+        run_add_command("tavily", None, None, None, &[], &path).await;
+
+        let result = run_update_backend(
+            "tavily",
+            BackendUpdate {
+                description: Some("updated desc".to_string()),
+                ..Default::default()
+            },
+            &path,
+        );
+        assert!(result.is_ok());
+
+        let config = Config::load(Some(&path)).unwrap();
+        assert_eq!(config.backends["tavily"].description, "updated desc");
+    }
+
+    #[test]
+    fn update_missing_backend_returns_error() {
+        let (_dir, path) = temp_config();
+        let result = run_update_backend("ghost", BackendUpdate::default(), &path);
+        assert!(result.is_err());
     }
 }

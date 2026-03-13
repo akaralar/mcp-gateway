@@ -7,6 +7,8 @@
 //!
 //! All UI code is gated behind the `webui` feature flag.
 
+pub mod backend_ops;
+
 use std::sync::Arc;
 use std::time::Instant;
 
