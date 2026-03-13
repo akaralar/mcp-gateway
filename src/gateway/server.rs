@@ -446,6 +446,7 @@ impl Gateway {
             } else {
                 Vec::new()
             },
+            config_path: self.config_path.clone(),
         });
 
         // Create router
