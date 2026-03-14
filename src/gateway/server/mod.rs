@@ -1,11 +1,11 @@
 //! Gateway server
 
+mod support;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum_server::tls_rustls::RustlsConfig;
 use tokio::net::TcpListener;
-use tokio::signal;
 use tracing::{debug, info, warn};
 
 use super::auth::ResolvedAuthConfig;
@@ -23,7 +23,7 @@ use crate::config_reload::{ConfigWatcher, LiveConfig, ReloadContext};
 #[cfg(feature = "cost-governance")]
 use crate::cost_accounting::{
     enforcer::BudgetEnforcer,
-    persistence::{self, PersistedCosts},
+    persistence::{self},
     registry::CostRegistry,
 };
 use crate::key_server::{KeyServer, store::spawn_reaper};
@@ -37,6 +37,10 @@ use crate::security::firewall::Firewall;
 use crate::stats::UsageStats;
 use crate::transition::TransitionTracker;
 use crate::{Error, Result};
+
+#[cfg(feature = "cost-governance")]
+use support::build_persisted_costs;
+use support::{log_startup_banner, serve_tls, shutdown_signal};
 
 /// MCP Gateway server
 pub struct Gateway {
@@ -557,50 +561,7 @@ impl Gateway {
         // Bind listener
         let listener = TcpListener::bind(addr).await?;
 
-        info!("============================================================");
-        info!("MCP GATEWAY v{}", env!("CARGO_PKG_VERSION"));
-        info!("============================================================");
-        info!(host = %self.config.server.host, port = %self.config.server.port, "Listening");
-        info!(backends = self.backends.all().len(), "Backends registered");
-
-        if self.config.auth.enabled {
-            let key_count = self.config.auth.api_keys.len();
-            let has_bearer = self.config.auth.bearer_token.is_some();
-            info!(
-                "AUTHENTICATION enabled (bearer={}, api_keys={})",
-                has_bearer, key_count
-            );
-        } else {
-            warn!("AUTHENTICATION disabled - gateway is open to all requests");
-        }
-
-        if self.config.meta_mcp.enabled {
-            info!("META-MCP (saves ~95% context tokens):");
-            info!(
-                "  POST http://{}:{}/mcp  (requests)",
-                self.config.server.host, self.config.server.port
-            );
-        }
-
-        if self.config.streaming.enabled {
-            info!("STREAMING (real-time notifications):");
-            info!(
-                "  GET  http://{}:{}/mcp  (SSE stream)",
-                self.config.server.host, self.config.server.port
-            );
-            if !self.config.streaming.auto_subscribe.is_empty() {
-                info!(
-                    "  Auto-subscribe backends: {:?}",
-                    self.config.streaming.auto_subscribe
-                );
-            }
-        }
-
-        info!("Direct backend access:");
-        for backend in self.backends.all() {
-            info!("  /mcp/{}", backend.name);
-        }
-        info!("============================================================");
+        log_startup_banner(&self.config, &self.backends);
 
         // Warm-start backends: connect + prefetch tools into cache
         // If warm_start list is empty, warm ALL backends (makes list/search fast)
@@ -797,102 +758,4 @@ impl Gateway {
 
         Ok(())
     }
-}
-
-/// Build a `PersistedCosts` snapshot from the current enforcer state.
-#[cfg(feature = "cost-governance")]
-fn build_persisted_costs(
-    snap: &crate::cost_accounting::enforcer::EnforcerSnapshot,
-) -> PersistedCosts {
-    use crate::cost_accounting::persistence::ToolTotal;
-
-    let tool_totals = snap
-        .tool_daily
-        .iter()
-        .map(|(name, &daily_usd)| {
-            (
-                name.clone(),
-                ToolTotal {
-                    call_count: 0,
-                    total_cost_usd: daily_usd,
-                    avg_cost_usd: 0.0,
-                },
-            )
-        })
-        .collect();
-
-    PersistedCosts {
-        saved_at: crate::cost_accounting::persistence::now_secs(),
-        tool_totals,
-        key_totals: snap.key_daily.clone(),
-    }
-}
-
-/// Start the HTTPS (mTLS) server using `axum-server`.
-///
-/// Builds a `rustls::ServerConfig` from `mtls_config`, wraps it in
-/// `axum-server`'s `RustlsConfig`, and runs until the `shutdown_fut` resolves.
-async fn serve_tls(
-    app: axum::Router,
-    addr: SocketAddr,
-    mtls_config: &crate::mtls::MtlsConfig,
-    shutdown_fut: impl std::future::Future<Output = ()> + Send + 'static,
-) -> crate::Result<()> {
-    use crate::mtls::cert_manager::build_tls_config;
-
-    let rustls_cfg = build_tls_config(mtls_config)?;
-    let rustls_config = RustlsConfig::from_config(Arc::new(rustls_cfg));
-
-    info!(
-        addr = %addr,
-        require_client_cert = mtls_config.require_client_cert,
-        "mTLS listener starting"
-    );
-
-    let handle = axum_server::Handle::new();
-    let handle_for_shutdown = handle.clone();
-
-    // Bridge our broadcast-based shutdown signal to the axum-server handle
-    tokio::spawn(async move {
-        shutdown_fut.await;
-        handle_for_shutdown.graceful_shutdown(Some(std::time::Duration::from_secs(30)));
-    });
-
-    axum_server::bind_rustls(addr, rustls_config)
-        .handle(handle)
-        .serve(app.into_make_service())
-        .await
-        .map_err(|e| crate::Error::Internal(format!("TLS server error: {e}")))
-}
-
-// The TLS path drops the `listener` created for plain HTTP because
-// `axum_server::bind_rustls` creates its own socket.  We re-bind above.
-// The plain `listener` variable is dropped before `serve_tls` is called.
-
-/// Shutdown signal handler
-async fn shutdown_signal(shutdown_tx: tokio::sync::broadcast::Sender<()>) {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
-    }
-
-    info!("Shutdown signal received");
-    let _ = shutdown_tx.send(());
 }
