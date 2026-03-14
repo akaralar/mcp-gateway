@@ -37,7 +37,7 @@ clap_complete = "4.6"
 
 # Logging & Telemetry
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json", "fmt"] }
 
 # Error handling
 thiserror = "2.0"
@@ -58,10 +58,10 @@ backon = { version = "1.6", default-features = false, features = ["std", "tokio-
 regex = "1.11"
 url = "2.5"
 uuid = { version = "1.11", features = ["v4", "fast-rng"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4.20", features = ["serde"] }
 dashmap = "6.1"
 parking_lot = "0.12"
-bytes = "1.9"
+bytes = "1.11.1"
 pin-project-lite = "0.2"
 
 # OAuth / Crypto
@@ -78,9 +78,9 @@ jsonwebtoken = { version = "10.3", features = ["use_pem", "aws_lc_rs"] }
 subtle = "2.6"
 
 # mTLS / TLS
-rustls = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23.18", default-features = false, features = ["ring", "tls12"] }
 rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
-time = { version = "0.3", default-features = false }
+time = { version = "0.3.47", default-features = false }
 x509-parser = "0.18"
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 tokio-rustls = "0.26"
