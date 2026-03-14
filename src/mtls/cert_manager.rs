@@ -21,7 +21,8 @@ use rcgen::{
     date_time_ymd,
 };
 use rustls::ServerConfig;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use tracing::debug;
 
@@ -88,7 +89,7 @@ pub fn build_tls_config(config: &MtlsConfig) -> Result<ServerConfig> {
 /// certificate blocks.
 pub fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     let pem_data = read_file(path)?;
-    let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut pem_data.as_slice())
+    let certs: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(pem_data.as_slice())
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| Error::Config(format!("Failed to parse certs from '{path}': {e}")))?;
 
@@ -109,9 +110,17 @@ pub fn load_certs(path: &str) -> Result<Vec<CertificateDer<'static>>> {
 /// the key format is unsupported.
 pub fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
     let pem_data = read_file(path)?;
-    let key = rustls_pemfile::private_key(&mut pem_data.as_slice())
-        .map_err(|e| Error::Config(format!("Failed to parse private key from '{path}': {e}")))?
-        .ok_or_else(|| Error::Config(format!("No private key found in '{path}'")))?;
+    let key = PrivateKeyDer::from_pem_slice(pem_data.as_slice()).map_err(|e| {
+        // NoItemsFound maps to the "no key" case; all other errors are parse failures.
+        match e {
+            rustls::pki_types::pem::Error::NoItemsFound => {
+                Error::Config(format!("No private key found in '{path}'"))
+            }
+            other => Error::Config(format!(
+                "Failed to parse private key from '{path}': {other}"
+            )),
+        }
+    })?;
 
     Ok(key)
 }
@@ -309,13 +318,11 @@ fn build_client_verifier(
 }
 
 /// Load CRL entries from a PEM file.
-fn load_crls(path: &str) -> Result<Vec<rustls::pki_types::CertificateRevocationListDer<'static>>> {
+fn load_crls(path: &str) -> Result<Vec<CertificateRevocationListDer<'static>>> {
     let pem_data = read_file(path)?;
-    let crls: Vec<rustls::pki_types::CertificateRevocationListDer<'static>> =
-        rustls_pemfile::crls(&mut pem_data.as_slice())
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| Error::Config(format!("Failed to parse CRL from '{path}': {e}")))?;
-    Ok(crls)
+    CertificateRevocationListDer::pem_slice_iter(pem_data.as_slice())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| Error::Config(format!("Failed to parse CRL from '{path}': {e}")))
 }
 
 /// Convert a validity period (days) into a future `OffsetDateTime` for `rcgen`.

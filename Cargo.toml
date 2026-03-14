@@ -78,7 +78,6 @@ subtle = "2.6"
 
 # mTLS / TLS
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
-rustls-pemfile = "2.2"
 rcgen = { version = "0.14", features = ["pem", "x509-parser"] }
 time = { version = "0.3", default-features = false }
 x509-parser = "0.18"

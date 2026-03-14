@@ -1808,7 +1808,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mcp-gateway"
-version = "2.7.0"
+version = "2.7.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1844,7 +1844,6 @@ dependencies = [
  "regex",
  "reqwest",
  "rustls",
- "rustls-pemfile",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -2784,15 +2783,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
