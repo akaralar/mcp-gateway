@@ -48,7 +48,7 @@ fn is_admin(client: Option<&AuthenticatedClient>) -> bool {
 
 /// Build the authenticated `/ui/api/*` and `/dashboard` sub-router.
 pub fn api_router() -> Router<Arc<AppState>> {
-    Router::new()
+    let router = Router::new()
         .route("/ui/api/status", get(status))
         .route("/ui/api/tools", get(tools))
         .route("/ui/api/config", get(config))
@@ -56,7 +56,12 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/dashboard", get(dashboard_handler))
         .merge(capabilities::capabilities_router())
         .merge(backends::backends_router())
-        .merge(import::import_router())
+        .merge(import::import_router());
+
+    #[cfg(feature = "cost-governance")]
+    let router = router.route("/ui/api/costs", get(costs));
+
+    router
 }
 
 /// Build the unauthenticated `/ui` route (serves static HTML, no data).
@@ -637,6 +642,32 @@ async fn reload(client: Option<Extension<AuthenticatedClient>>) -> impl IntoResp
     // This endpoint signals intent — the actual reload happens via notify/SIGHUP.
     // For now, return success to indicate the request was accepted.
     (StatusCode::OK, Json(json!({"status": "reload_requested"})))
+}
+
+/// `GET /ui/api/costs` — aggregate cost data for the web UI (admin only).
+///
+/// Returns aggregate totals, per-API-key breakdown, and per-session breakdown.
+/// Requires admin access (returns 401 for unauthenticated public requests).
+#[cfg(feature = "cost-governance")]
+async fn costs(
+    State(state): State<Arc<AppState>>,
+    client: Option<Extension<AuthenticatedClient>>,
+) -> impl IntoResponse {
+    let client = client.map(|Extension(c)| c);
+    if !is_admin(client.as_ref()) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Authentication required"})),
+        )
+            .into_response();
+    }
+    let tracker = state.meta_mcp.cost_tracker();
+    Json(serde_json::json!({
+        "aggregate": serde_json::to_value(tracker.aggregate()).unwrap_or(serde_json::Value::Null),
+        "by_key":     serde_json::to_value(tracker.all_keys()).unwrap_or(serde_json::json!([])),
+        "by_session": serde_json::to_value(tracker.all_sessions()).unwrap_or(serde_json::json!([])),
+    }))
+    .into_response()
 }
 
 // ── Private helpers ──────────────────────────────────────────────────
