@@ -279,6 +279,7 @@ tr:hover td { background: var(--bg3); }
     <a href="#servers" class="nav-link" data-page="servers">Servers</a>
     <a href="#capabilities" class="nav-link" data-page="capabilities">Capabilities</a>
     <a href="#config" class="nav-link" data-page="config">Config</a>
+    <a href="#costs" class="nav-link" data-page="costs">Costs</a>
   </nav>
 
   <main>
@@ -424,6 +425,28 @@ tr:hover td { background: var(--bg3); }
       </div>
       <div class="config-block" id="config-content">Loading...</div>
     </div>
+
+    <!-- Costs -->
+    <div id="page-costs" class="page">
+      <h1>Costs</h1>
+      <div class="cards" id="costs-cards">
+        <div class="card"><div class="label">Sessions</div><div class="value" id="c-sessions">-</div></div>
+        <div class="card"><div class="label">API Keys</div><div class="value" id="c-keys">-</div></div>
+        <div class="card"><div class="label">Total Calls</div><div class="value" id="c-calls">-</div></div>
+        <div class="card"><div class="label">Total Tokens</div><div class="value" id="c-tokens">-</div></div>
+        <div class="card"><div class="label">Est. Cost (USD)</div><div class="value" id="c-cost">-</div></div>
+      </div>
+      <h2>By API Key</h2>
+      <table>
+        <thead><tr><th>Key</th><th>24 h Tokens</th><th>24 h Cost</th><th>7 d Cost</th><th>30 d Cost</th><th>Budget</th></tr></thead>
+        <tbody id="costs-keys-tbody"><tr><td colspan="6" style="color:var(--fg2)">Loading...</td></tr></tbody>
+      </table>
+      <h2 style="margin-top:1.5rem">By Session</h2>
+      <table>
+        <thead><tr><th>Session</th><th>Key</th><th>Calls</th><th>Tokens</th><th>Est. Cost</th></tr></thead>
+        <tbody id="costs-sessions-tbody"><tr><td colspan="5" style="color:var(--fg2)">Loading...</td></tr></tbody>
+      </table>
+    </div>
   </main>
 </div>
 
@@ -528,7 +551,7 @@ function onHash() {
   if (hash === 'tools') refreshTools();
   if (hash === 'capabilities') refreshCapabilities();
   if (hash === 'config') refreshConfig();
-  if (hash === 'capabilities') refreshCapabilities();
+  if (hash === 'costs') refreshCosts();
 }
 window.addEventListener('hashchange', onHash);
 
@@ -860,6 +883,51 @@ async function doReload() {
     status.style.color = 'var(--red)';
   }
   btn.disabled = false;
+}
+
+// Costs
+async function refreshCosts() {
+  try {
+    const d = await apiFetch('/ui/api/costs');
+    const agg = d.aggregate || {};
+    document.getElementById('c-sessions').textContent = agg.session_count ?? '-';
+    document.getElementById('c-keys').textContent = agg.key_count ?? '-';
+    document.getElementById('c-calls').textContent = agg.total_calls ?? '-';
+    document.getElementById('c-tokens').textContent = (agg.total_tokens ?? 0).toLocaleString();
+    document.getElementById('c-cost').textContent = '$' + ((agg.total_cost_usd ?? 0).toFixed(6));
+
+    const keysTbody = document.getElementById('costs-keys-tbody');
+    const keys = d.by_key || [];
+    if (keys.length === 0) {
+      keysTbody.innerHTML = '<tr><td colspan="6" style="color:var(--fg2)">No API key data recorded yet</td></tr>';
+    } else {
+      keysTbody.innerHTML = keys.map(k => `<tr>
+        <td><strong>${esc(k.api_key_name)}</strong></td>
+        <td>${(k.window_24h?.tokens ?? 0).toLocaleString()}</td>
+        <td>$${(k.window_24h?.cost_usd ?? 0).toFixed(6)}</td>
+        <td>$${(k.window_7d?.cost_usd ?? 0).toFixed(6)}</td>
+        <td>$${(k.window_30d?.cost_usd ?? 0).toFixed(6)}</td>
+        <td>${esc(k.budget_status ?? 'Ok')}</td>
+      </tr>`).join('');
+    }
+
+    const sessTbody = document.getElementById('costs-sessions-tbody');
+    const sessions = d.by_session || [];
+    if (sessions.length === 0) {
+      sessTbody.innerHTML = '<tr><td colspan="5" style="color:var(--fg2)">No session data recorded yet</td></tr>';
+    } else {
+      sessTbody.innerHTML = sessions.map(s => `<tr>
+        <td><code style="font-size:0.8rem">${esc(s.session_id)}</code></td>
+        <td>${esc(s.api_key_name ?? '-')}</td>
+        <td>${s.call_count ?? 0}</td>
+        <td>${(s.total_tokens ?? 0).toLocaleString()}</td>
+        <td>$${(s.total_cost_usd ?? 0).toFixed(6)}</td>
+      </tr>`).join('');
+    }
+  } catch (e) {
+    document.getElementById('costs-keys-tbody').innerHTML =
+      `<tr><td colspan="6" style="color:var(--red)">${esc(e.message)}</td></tr>`;
+  }
 }
 
 // Capabilities
