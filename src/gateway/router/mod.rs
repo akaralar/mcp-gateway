@@ -23,7 +23,7 @@ use crate::security::firewall::Firewall;
 
 mod backend_handlers;
 mod handlers;
-mod helpers;
+pub(crate) mod helpers;
 
 #[cfg(test)]
 mod tests;

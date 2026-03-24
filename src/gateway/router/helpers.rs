@@ -47,7 +47,7 @@ pub(super) fn parse_sampling_params(
 ///
 /// Supports string and integer ID values per JSON-RPC 2.0 spec.
 /// Returns `None` if the value is not a recognised ID type.
-pub(super) fn extract_request_id(value: &Value) -> Option<RequestId> {
+pub(crate) fn extract_request_id(value: &Value) -> Option<RequestId> {
     if value.is_string() {
         Some(RequestId::String(value.as_str().unwrap().to_string()))
     } else if value.is_i64() {
@@ -61,7 +61,7 @@ pub(super) fn extract_request_id(value: &Value) -> Option<RequestId> {
 }
 
 /// Check whether a method name represents a notification (no response expected).
-pub(super) fn is_notification_method(method: &str) -> bool {
+pub(crate) fn is_notification_method(method: &str) -> bool {
     method.starts_with("notifications/")
 }
 
@@ -69,7 +69,7 @@ pub(super) fn is_notification_method(method: &str) -> bool {
 ///
 /// Returns `("", {})` when the expected fields are absent so callers never
 /// need to deal with `Option`.
-pub(super) fn extract_tools_call_params(params: Option<&Value>) -> (&str, Value) {
+pub(crate) fn extract_tools_call_params(params: Option<&Value>) -> (&str, Value) {
     let tool_name = params
         .and_then(|p| p.get("name"))
         .and_then(|v| v.as_str())
