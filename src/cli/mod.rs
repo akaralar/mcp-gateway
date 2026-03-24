@@ -131,7 +131,20 @@ pub struct Cli {
 pub enum Command {
     /// Start the gateway server (default when no subcommand is given)
     #[command(about = "Start the gateway server")]
-    Serve,
+    Serve {
+        /// Run in stdio mode: read JSON-RPC from stdin, write responses to stdout.
+        ///
+        /// Skips the HTTP listener and speaks MCP over newline-delimited JSON-RPC,
+        /// making `mcp-gateway` directly usable as a Claude Code / MCP stdio server:
+        ///
+        ///   `mcp-gateway serve --stdio`
+        ///
+        /// or simply:
+        ///
+        ///   `echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{...}}' | mcp-gateway serve --stdio`
+        #[arg(long, default_value_t = false)]
+        stdio: bool,
+    },
 
     /// Manage capability definitions (validate, test, import, install)
     #[command(subcommand, about = "Capability management commands")]

@@ -160,7 +160,8 @@ async fn main() -> ExitCode {
         Some(Command::Doctor { fix, config }) => {
             commands::run_doctor_command(fix, config.as_deref()).await
         }
-        Some(Command::Serve) | None => run_server(cli).await,
+        Some(Command::Serve { stdio: true }) => run_stdio_server(cli).await,
+        Some(Command::Serve { stdio: false }) | None => run_server(cli).await,
     }
 }
 
@@ -217,6 +218,36 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
     if cli.no_meta_mcp {
         config.meta_mcp.enabled = false;
     }
+}
+
+/// Run the gateway in stdio mode (newline-delimited JSON-RPC on stdin/stdout).
+async fn run_stdio_server(cli: Cli) -> ExitCode {
+    let config = match Config::load(cli.config.as_deref()) {
+        Ok(mut config) => {
+            apply_cli_overrides(&mut config, &cli);
+            config
+        }
+        Err(e) => {
+            eprintln!("Failed to load configuration: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let config_path = cli.config.as_deref().map(std::path::Path::to_path_buf);
+    let gateway = match Gateway::new_with_path(config, config_path).await {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("Failed to create gateway: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(e) = gateway.run_stdio().await {
+        eprintln!("stdio gateway error: {e}");
+        return ExitCode::FAILURE;
+    }
+
+    ExitCode::SUCCESS
 }
 
 /// Run the gateway server.

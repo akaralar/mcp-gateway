@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Native stdio transport** (`mcp-gateway serve --stdio`): gateway now reads newline-delimited JSON-RPC from stdin and writes responses to stdout, enabling direct use as a Claude Code / MCP stdio subprocess without a bridge script. Supports all MCP methods (`initialize`, `tools/list`, `tools/call`, `prompts/*`, `resources/*`, `logging/setLevel`, `ping`) and batch requests. Reuses the same `MetaMcp` dispatch logic as the HTTP server.
+- **5 new capability YAML files**:
+  - `capabilities/productivity/notion_create_page.yaml` — create a Notion page under any parent page or database
+  - `capabilities/finance/stripe_create_payment_intent.yaml` — create a Stripe PaymentIntent (modern payments API)
+  - `capabilities/developer/github_create_issue.yaml` — create a GitHub issue with labels, assignees, and milestone
+- **`capabilities/developer/` directory** — new top-level category for developer-tool capabilities
+
 ## [2.7.3] - 2026-03-16
 
 ### Added

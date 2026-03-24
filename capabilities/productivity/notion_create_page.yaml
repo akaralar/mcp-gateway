@@ -1,0 +1,102 @@
+fulcrum: "1.0"
+name: notion_create_page
+description: Create a new page in a Notion workspace under a specified parent page or database
+
+schema:
+  input:
+    type: object
+    properties:
+      parent_id:
+        type: string
+        description: "ID of the parent page or database. For databases use a database ID; for pages use a page ID. Find IDs in the Notion URL after the last '-' (32-char hex)."
+      title:
+        type: string
+        description: Title of the new page
+      content:
+        type: string
+        description: "Optional markdown-style text content for the page body (plain text, added as paragraph blocks)"
+      icon_emoji:
+        type: string
+        description: "Single emoji to use as the page icon (e.g. '📄', '🚀')"
+      cover_url:
+        type: string
+        description: "External image URL to use as the page cover"
+      properties:
+        type: object
+        description: "Additional database property values when parent is a database (key = property name, value = Notion property value object)"
+    required:
+      - parent_id
+      - title
+  output:
+    type: object
+    properties:
+      id:
+        type: string
+        description: "Unique page ID (UUID format)"
+      url:
+        type: string
+        description: "Direct URL to the newly created Notion page"
+      created_time:
+        type: string
+        description: ISO 8601 creation timestamp
+      last_edited_time:
+        type: string
+        description: ISO 8601 last-edited timestamp
+      object:
+        type: string
+        enum: [page]
+      parent:
+        type: object
+        description: Parent reference (page_id or database_id)
+      archived:
+        type: boolean
+
+providers:
+  primary:
+    service: rest
+    cost_per_call: 0
+    timeout: 15
+    config:
+      base_url: https://api.notion.com
+      path: /v1/pages
+      method: POST
+      headers:
+        Authorization: "Bearer {env.NOTION_API_KEY}"
+        Content-Type: "application/json"
+        Notion-Version: "2022-06-28"
+      body:
+        parent:
+          page_id: "{parent_id}"
+        properties:
+          title:
+            title:
+              - text:
+                  content: "{title}"
+
+cache:
+  strategy: none
+  ttl: 0
+
+auth:
+  required: true
+  type: bearer
+  key: env:NOTION_API_KEY
+  description: "Create an integration at https://www.notion.so/my-integrations, copy the Internal Integration Token (starts with 'secret_'), and share the target pages/databases with the integration."
+  header: Authorization
+  prefix: Bearer
+
+metadata:
+  category: productivity
+  tags:
+    - notion
+    - pages
+    - documents
+    - knowledge-base
+    - productivity
+    - create
+    - wiki
+  cost_category: free
+  execution_time: fast
+  read_only: false
+  rate_limit: "3 req/sec (averaged)"
+  docs: https://developers.notion.com/reference/post-page
