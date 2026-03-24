@@ -5,6 +5,7 @@ mod support;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tracing::{debug, info, warn};
 
@@ -770,5 +771,347 @@ impl Gateway {
         self.backends.stop_all().await;
 
         Ok(())
+    }
+
+    /// Run the gateway in stdio mode.
+    ///
+    /// Reads newline-delimited JSON-RPC from stdin and writes responses to stdout.
+    /// Reuses the same MetaMcp dispatch logic as the HTTP server so all meta-tools
+    /// (`gateway_search_tools`, `gateway_invoke`, etc.) work identically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if backend registration or MetaMcp initialisation fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if RSA key pair generation fails on all retry attempts.
+    #[allow(clippy::too_many_lines)]
+    pub async fn run_stdio(self) -> Result<()> {
+        info!(version = env!("CARGO_PKG_VERSION"), "Starting MCP Gateway (stdio mode)");
+
+        // ── Build the same MetaMcp and supporting components as run() ──────────
+        let cache = if self.config.cache.enabled {
+            let cache = if self.config.cache.max_entries > 0 {
+                Arc::new(ResponseCache::with_max_entries(self.config.cache.max_entries))
+            } else {
+                Arc::new(ResponseCache::new())
+            };
+            Some(cache)
+        } else {
+            None
+        };
+
+        let tool_policy = Arc::new(ToolPolicy::from_config(&self.config.security.tool_policy));
+        let mtls_policy = Arc::new(MtlsPolicy::from_config(&self.config.mtls));
+        let usage_stats = Some(Arc::new(UsageStats::new()));
+        let ranker = Arc::new(SearchRanker::new());
+        let transition_tracker = Arc::new(TransitionTracker::new());
+
+        let profile_registry = ProfileRegistry::from_config(
+            &self.config.routing_profiles,
+            &self.config.default_routing_profile,
+        );
+        let secret_injector =
+            crate::secret_injection::SecretInjector::from_backend_configs(&self.config.backends);
+
+        #[cfg(feature = "cost-governance")]
+        #[allow(unused_variables)]
+        let data_dir = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".mcp-gateway");
+
+        #[cfg(feature = "cost-governance")]
+        let (cost_registry_opt, budget_enforcer_opt) = {
+            let cg_cfg = self.config.cost_governance.clone();
+            if cg_cfg.enabled {
+                let registry = Arc::new(CostRegistry::new(&cg_cfg));
+                let enforcer = Arc::new(BudgetEnforcer::new(cg_cfg, Arc::clone(&registry)));
+                (Some(registry), Some(enforcer))
+            } else {
+                (None, None)
+            }
+        };
+
+        #[allow(unused_mut)]
+        let mut meta_mcp_builder = MetaMcp::with_features(
+            Arc::clone(&self.backends),
+            cache,
+            usage_stats,
+            Some(ranker),
+            self.config.cache.default_ttl,
+        )
+        .with_profile_registry(profile_registry)
+        .with_code_mode(self.config.code_mode.enabled)
+        .with_secret_injector(secret_injector)
+        .with_surfaced_tools(self.config.meta_mcp.surfaced_tools.clone());
+
+        #[cfg(feature = "cost-governance")]
+        if let (Some(registry), Some(enforcer)) = (cost_registry_opt, budget_enforcer_opt) {
+            meta_mcp_builder = meta_mcp_builder.with_cost_governance(enforcer, registry);
+        }
+
+        let meta_mcp = Arc::new(meta_mcp_builder);
+        meta_mcp.set_transition_tracker(transition_tracker);
+
+        if self.config.capabilities.enabled {
+            let executor = Arc::new(CapabilityExecutor::new());
+            let cap_backend = Arc::new(CapabilityBackend::new(
+                &self.config.capabilities.name,
+                executor,
+            ));
+            for dir in &self.config.capabilities.directories {
+                if let Ok(count) = cap_backend.load_from_directory(dir).await {
+                    debug!(directory = %dir, count, "Loaded capabilities (stdio)");
+                }
+            }
+            meta_mcp.set_capabilities(cap_backend);
+        }
+
+        if self.config.playbooks.enabled {
+            let mut engine = crate::playbook::PlaybookEngine::new();
+            for dir in &self.config.playbooks.directories {
+                if let Ok(count) = engine.load_from_directory(dir) {
+                    debug!(directory = %dir, count, "Loaded playbooks (stdio)");
+                }
+            }
+            meta_mcp.set_playbook_engine(engine);
+        }
+
+        // Warm-start backends (same as HTTP mode)
+        {
+            let warm_start_list = if self.config.meta_mcp.warm_start.is_empty() {
+                self.backends.all().iter().map(|b| b.name.clone()).collect::<Vec<_>>()
+            } else {
+                self.config.meta_mcp.warm_start.clone()
+            };
+            let backends_clone = Arc::clone(&self.backends);
+            tokio::spawn(async move {
+                for name in warm_start_list {
+                    if let Some(backend) = backends_clone.get(&name) {
+                        if let Err(e) = backend.start().await {
+                            warn!(backend = %name, error = %e, "Warm-start failed (stdio)");
+                        }
+                    }
+                }
+            });
+        }
+
+        info!("MCP Gateway stdio mode ready — reading JSON-RPC from stdin");
+
+        // ── Read → dispatch → write loop ────────────────────────────────────
+        let stdin = tokio::io::stdin();
+        let stdout = tokio::io::stdout();
+        let mut reader = BufReader::new(stdin).lines();
+        let mut stdout = stdout;
+
+        // Use a fixed session ID for stdio sessions (single client, long-lived)
+        let session_id = "stdio-session";
+
+        while let Ok(Some(line)) = reader.next_line().await {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+
+            debug!(line_len = line.len(), "stdio: received line");
+
+            let request: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(e) => {
+                    let err_resp = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "error": {"code": -32700, "message": format!("Parse error: {e}")}
+                    });
+                    Self::write_response(&mut stdout, &err_resp).await;
+                    continue;
+                }
+            };
+
+            // Handle batch requests (array of JSON-RPC calls)
+            if request.is_array() {
+                let responses = Self::dispatch_batch(
+                    &meta_mcp,
+                    &tool_policy,
+                    &mtls_policy,
+                    request,
+                    session_id,
+                )
+                .await;
+                if !responses.is_empty() {
+                    let batch_resp = serde_json::Value::Array(responses);
+                    Self::write_response(&mut stdout, &batch_resp).await;
+                }
+                continue;
+            }
+
+            // Single request
+            let response_opt = Self::dispatch_single(
+                &meta_mcp,
+                &tool_policy,
+                &mtls_policy,
+                &request,
+                session_id,
+            )
+            .await;
+
+            if let Some(response) = response_opt {
+                Self::write_response(&mut stdout, &response).await;
+            }
+        }
+
+        info!("stdio: EOF reached, shutting down");
+        self.backends.stop_all().await;
+        Ok(())
+    }
+
+    /// Write a JSON-RPC response to stdout followed by a newline.
+    async fn write_response(stdout: &mut tokio::io::Stdout, value: &serde_json::Value) {
+        let serialized = match serde_json::to_string(value) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, "Failed to serialize response");
+                return;
+            }
+        };
+        debug!(response_len = serialized.len(), "stdio: writing response");
+        if let Err(e) = stdout.write_all(serialized.as_bytes()).await {
+            warn!(error = %e, "Failed to write to stdout");
+            return;
+        }
+        if let Err(e) = stdout.write_all(b"\n").await {
+            warn!(error = %e, "Failed to write newline to stdout");
+            return;
+        }
+        if let Err(e) = stdout.flush().await {
+            warn!(error = %e, "Failed to flush stdout");
+        }
+    }
+
+    /// Dispatch a single JSON-RPC request through MetaMcp.
+    ///
+    /// Returns `None` for notifications (no response expected per JSON-RPC spec).
+    async fn dispatch_single(
+        meta_mcp: &Arc<MetaMcp>,
+        tool_policy: &Arc<crate::security::ToolPolicy>,
+        _mtls_policy: &Arc<crate::mtls::MtlsPolicy>,
+        request: &serde_json::Value,
+        session_id: &str,
+    ) -> Option<serde_json::Value> {
+        use super::router::helpers::{
+            extract_request_id, extract_tools_call_params, is_notification_method,
+        };
+        use crate::protocol::JsonRpcResponse;
+
+        // Validate jsonrpc version
+        if request.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
+            let resp = JsonRpcResponse::error(None, -32600, "Invalid JSON-RPC version");
+            return Some(serde_json::to_value(resp).unwrap());
+        }
+
+        let id = request.get("id").and_then(extract_request_id);
+
+        let method = match request.get("method").and_then(|v| v.as_str()) {
+            Some(m) => m.to_string(),
+            None => {
+                let resp = JsonRpcResponse::error(id, -32600, "Missing method");
+                return Some(serde_json::to_value(resp).unwrap());
+            }
+        };
+
+        let params = request.get("params").cloned();
+
+        // Notifications have no id — send no response
+        if is_notification_method(&method) {
+            debug!(notification = %method, "stdio: notification (no response)");
+            return None;
+        }
+
+        // Requests must have an id
+        let id = match id {
+            Some(i) => i,
+            None => {
+                let resp = JsonRpcResponse::error(None, -32600, "Missing id");
+                return Some(serde_json::to_value(resp).unwrap());
+            }
+        };
+
+        let response = match method.as_str() {
+            "initialize" => meta_mcp.handle_initialize(id, params.as_ref(), Some(session_id), None),
+            "tools/list" => {
+                meta_mcp.handle_tools_list_with_params(id, params.as_ref(), Some(session_id))
+            }
+            "tools/call" => {
+                let (tool_name, arguments) = extract_tools_call_params(params.as_ref());
+                let tool_name = tool_name.to_string();
+
+                // Apply tool policy check for gateway_invoke calls
+                if tool_name == "gateway_invoke" {
+                    if let Some(ref p) = params {
+                        let server = p
+                            .get("arguments")
+                            .and_then(|a| a.get("server"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let tool = p
+                            .get("arguments")
+                            .and_then(|a| a.get("tool"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !server.is_empty() && !tool.is_empty() {
+                            if let Err(e) = tool_policy.check(server, tool) {
+                                let resp = JsonRpcResponse::error(Some(id), -32600, e.to_string());
+                                return Some(serde_json::to_value(resp).unwrap());
+                            }
+                        }
+                    }
+                }
+
+                meta_mcp
+                    .handle_tools_call(id, &tool_name, arguments, Some(session_id), None)
+                    .await
+            }
+            "prompts/list" => meta_mcp.handle_prompts_list(id, params.as_ref()).await,
+            "prompts/get" => meta_mcp.handle_prompts_get(id, params.as_ref()).await,
+            "resources/list" => meta_mcp.handle_resources_list(id, params.as_ref()).await,
+            "resources/read" => meta_mcp.handle_resources_read(id, params.as_ref()).await,
+            "resources/templates/list" => {
+                meta_mcp.handle_resources_templates_list(id, params.as_ref()).await
+            }
+            "logging/setLevel" => {
+                meta_mcp.handle_logging_set_level(id, params.as_ref()).await
+            }
+            "ping" => JsonRpcResponse::success(id, serde_json::json!({})),
+            other => {
+                debug!(method = %other, "stdio: unknown method");
+                JsonRpcResponse::error(Some(id), -32601, format!("Method not found: {other}"))
+            }
+        };
+
+        Some(serde_json::to_value(response).unwrap())
+    }
+
+    /// Dispatch a JSON-RPC batch request.
+    async fn dispatch_batch(
+        meta_mcp: &Arc<MetaMcp>,
+        tool_policy: &Arc<crate::security::ToolPolicy>,
+        mtls_policy: &Arc<crate::mtls::MtlsPolicy>,
+        batch: serde_json::Value,
+        session_id: &str,
+    ) -> Vec<serde_json::Value> {
+        let Some(requests) = batch.as_array() else {
+            return vec![];
+        };
+
+        let mut responses = Vec::new();
+        for req in requests {
+            if let Some(resp) =
+                Self::dispatch_single(meta_mcp, tool_policy, mtls_policy, req, session_id).await
+            {
+                responses.push(resp);
+            }
+        }
+        responses
     }
 }
