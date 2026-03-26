@@ -1,0 +1,127 @@
+//! Shared helpers for mutating and persisting gateway config files.
+
+use std::path::{Path, PathBuf};
+
+use crate::config::Config;
+use crate::config_reload::ReloadContext;
+
+/// Load config from `path`, returning `Config::default()` when the file is absent
+/// or cannot be parsed.
+#[must_use]
+pub fn load_config_or_default(path: &Path) -> Config {
+    if path.exists() {
+        Config::load(Some(path)).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "Could not load config, using defaults");
+            Config::default()
+        })
+    } else {
+        Config::default()
+    }
+}
+
+/// Load config from `path`, returning `Config::default()` when the file is absent.
+///
+/// # Errors
+///
+/// Returns an error when the file exists but cannot be parsed.
+pub fn load_existing_or_default(path: &Path) -> crate::Result<Config> {
+    if path.exists() {
+        Config::load(Some(path))
+    } else {
+        Ok(Config::default())
+    }
+}
+
+/// Serialize `config` as YAML and write it to `path`.
+///
+/// # Errors
+///
+/// Returns `Err` on serialisation or I/O failure.
+pub fn write_config(path: &Path, config: &Config) -> Result<(), String> {
+    let yaml =
+        serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
+    write_yaml(path, &yaml)
+}
+
+/// Serialize `config`, write it atomically, then trigger hot-reload when a
+/// reload context is available.
+///
+/// # Errors
+///
+/// Returns an error string on serialization, write, rename, or reload failure.
+pub async fn write_config_and_reload(
+    path: &Path,
+    config: &Config,
+    reload_context: Option<&ReloadContext>,
+) -> Result<(), String> {
+    write_config(path, config)?;
+
+    if let Some(ctx) = reload_context {
+        ctx.reload()
+            .await
+            .map_err(|e| format!("Config written but reload failed: {e}"))?;
+    }
+
+    Ok(())
+}
+
+fn write_yaml(path: &Path, yaml: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::fs::write(path, yaml).map_err(|e| format!("Failed to write config: {e}"))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let tmp_path = temp_config_path(path);
+        std::fs::write(&tmp_path, yaml).map_err(|e| format!("Failed to write temp config: {e}"))?;
+        std::fs::rename(&tmp_path, path).map_err(|e| format!("Failed to replace config file: {e}"))
+    }
+}
+
+fn temp_config_path(path: &Path) -> PathBuf {
+    let mut tmp_path = path.as_os_str().to_os_string();
+    tmp_path.push(".tmp");
+    PathBuf::from(tmp_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_existing_or_default_returns_default_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.yaml");
+
+        let config = load_existing_or_default(&path).unwrap();
+
+        assert!(config.backends.is_empty());
+    }
+
+    #[test]
+    fn write_config_persists_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.yaml");
+        let config = Config::default();
+
+        write_config(&path, &config).unwrap();
+
+        assert!(path.exists());
+        let loaded = Config::load(Some(&path)).unwrap();
+        assert_eq!(loaded.backends.len(), config.backends.len());
+    }
+
+    #[tokio::test]
+    async fn write_config_and_reload_without_context_persists_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.yaml");
+        let config = Config::default();
+
+        write_config_and_reload(&path, &config, None).await.unwrap();
+
+        assert!(path.exists());
+        let loaded = Config::load(Some(&path)).unwrap();
+        assert_eq!(loaded.backends.len(), config.backends.len());
+    }
+}

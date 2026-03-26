@@ -13,6 +13,7 @@ use tracing::{error, info};
 use mcp_gateway::{
     cli::{Cli, Command, PluginCommand, SetupCommand, SkillsCommand},
     config::Config,
+    config_persistence::{load_existing_or_default, write_config},
     gateway::Gateway,
     setup_tracing,
     validator::ValidateConfig,
@@ -299,22 +300,14 @@ pub fn write_discovered_to_config(
         std::path::Path::to_path_buf,
     );
 
-    let mut config = if path.exists() {
-        Config::load(Some(&path))?
-    } else {
-        Config::default()
-    };
+    let mut config = load_existing_or_default(&path)?;
 
     for server in servers {
         let backend_config = server.to_backend_config();
         config.backends.insert(server.name.clone(), backend_config);
     }
 
-    let yaml = serde_yaml::to_string(&config)
-        .map_err(|e| mcp_gateway::Error::Config(format!("Failed to serialize config: {e}")))?;
-
-    std::fs::write(&path, yaml)
-        .map_err(|e| mcp_gateway::Error::Config(format!("Failed to write config: {e}")))?;
+    write_config(&path, &config).map_err(mcp_gateway::Error::Config)?;
 
     Ok(path)
 }
@@ -323,7 +316,22 @@ pub fn write_discovered_to_config(
 mod tests {
     use super::*;
     use mcp_gateway::cli::Cli;
-    use mcp_gateway::config::{BackendConfig, Config};
+    use mcp_gateway::config::{BackendConfig, Config, TransportConfig};
+    use mcp_gateway::discovery::{DiscoveredServer, DiscoverySource, ServerMetadata};
+
+    fn make_discovered_server(name: &str) -> DiscoveredServer {
+        DiscoveredServer {
+            name: name.to_string(),
+            description: format!("{name} server"),
+            source: DiscoverySource::ClaudeDesktop,
+            transport: TransportConfig::Stdio {
+                command: format!("npx -y {name}"),
+                cwd: None,
+                protocol_version: None,
+            },
+            metadata: ServerMetadata::default(),
+        }
+    }
 
     fn make_cli(port: Option<u16>, host: Option<String>, no_meta_mcp: bool) -> Cli {
         Cli {
@@ -465,6 +473,38 @@ mod tests {
         assert!(content.contains("port: 3000"));
         assert!(content.contains("meta_mcp:"));
         assert!(content.contains("enabled: true"));
+    }
+
+    #[test]
+    fn write_discovered_to_config_creates_file_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("discovered.yaml");
+        let server = make_discovered_server("tavily");
+
+        let written =
+            write_discovered_to_config(&[server], Some(&output)).expect("write should succeed");
+
+        assert_eq!(written, output);
+        let loaded = Config::load(Some(&output)).expect("must reload");
+        assert!(loaded.backends.contains_key("tavily"));
+    }
+
+    #[test]
+    fn write_discovered_to_config_preserves_existing_backends() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("discovered.yaml");
+        let mut existing = Config::default();
+        existing
+            .backends
+            .insert("existing".to_string(), BackendConfig::default());
+        write_config(&output, &existing).expect("initial write should succeed");
+
+        let server = make_discovered_server("tavily");
+        write_discovered_to_config(&[server], Some(&output)).expect("write should succeed");
+
+        let loaded = Config::load(Some(&output)).expect("must reload");
+        assert!(loaded.backends.contains_key("existing"));
+        assert!(loaded.backends.contains_key("tavily"));
     }
 
     #[test]

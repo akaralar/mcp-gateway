@@ -617,6 +617,22 @@ fn log_reload_trigger(trigger: &ReloadTrigger) {
     }
 }
 
+fn load_config_patch(
+    config_path: &std::path::Path,
+    live_config: &Arc<LiveConfig>,
+) -> std::result::Result<Option<(Config, ConfigPatch)>, String> {
+    let old_config = live_config.get();
+    let new_config =
+        Config::load(Some(config_path)).map_err(|e| format!("Failed to parse config: {e}"))?;
+    let patch = compute_diff(&old_config, &new_config);
+
+    if patch.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some((new_config, patch)))
+    }
+}
+
 /// Parse the config file, compute the diff, and apply the patch.
 async fn reload_once(
     config_path: &std::path::Path,
@@ -625,22 +641,16 @@ async fn reload_once(
     failsafe_cfg: &crate::config::FailsafeConfig,
     cache_ttl: Duration,
 ) {
-    let old_config = live_config.get();
-
-    let new_config = match Config::load(Some(config_path)) {
-        Ok(c) => c,
+    let Some((new_config, patch)) = (match load_config_patch(config_path, live_config) {
+        Ok(result) => result,
         Err(e) => {
             warn!(error = %e, "Config reload: failed to parse config file, keeping current config");
             return;
         }
-    };
-
-    let patch = compute_diff(&old_config, &new_config);
-
-    if patch.is_empty() {
+    }) else {
         tracing::debug!("Config reload: no changes detected");
         return;
-    }
+    };
 
     info!(changes = %patch.summary(), "Config reload: applying patch");
 
@@ -701,16 +711,10 @@ impl ReloadContext {
     ///
     /// Returns an error string if the config file cannot be read or parsed.
     pub async fn reload(&self) -> std::result::Result<String, String> {
-        let old_config = self.live_config.get();
-
-        let new_config = Config::load(Some(&self.config_path))
-            .map_err(|e| format!("Failed to parse config: {e}"))?;
-
-        let patch = compute_diff(&old_config, &new_config);
-
-        if patch.is_empty() {
+        let Some((new_config, patch)) = load_config_patch(&self.config_path, &self.live_config)?
+        else {
             return Ok("no changes detected".to_string());
-        }
+        };
 
         let summary = patch.summary();
         apply_patch(
