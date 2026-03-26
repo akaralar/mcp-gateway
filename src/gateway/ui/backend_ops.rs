@@ -6,10 +6,10 @@
 //! future HTTP handlers can call the same functions directly.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::config_persistence::{load_config_or_default, write_config};
 use crate::{
     config::{BackendConfig, Config, TransportConfig},
     registry::server_registry,
@@ -277,31 +277,6 @@ pub fn import_openapi_from_file(
                 .map_err(|e| format!("Failed to serialize capability '{}': {e}", cap.name))
         })
         .collect()
-}
-
-// ── Config I/O helpers ────────────────────────────────────────────────────────
-
-/// Load config from `path`, returning `Config::default()` when the file is absent.
-pub fn load_config_or_default(path: &Path) -> Config {
-    if path.exists() {
-        Config::load(Some(path)).unwrap_or_else(|e| {
-            tracing::warn!("Could not load config ({e}); using defaults.");
-            Config::default()
-        })
-    } else {
-        Config::default()
-    }
-}
-
-/// Serialize `config` as YAML and write it to `path`.
-///
-/// # Errors
-///
-/// Returns `Err` on serialisation or I/O failure.
-pub fn write_config(path: &Path, config: &Config) -> Result<(), String> {
-    let yaml =
-        serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-    std::fs::write(path, yaml).map_err(|e| e.to_string())
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────

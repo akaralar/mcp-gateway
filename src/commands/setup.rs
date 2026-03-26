@@ -12,6 +12,7 @@ use std::process::ExitCode;
 
 use mcp_gateway::{
     config::{Config, TransportConfig},
+    config_persistence::{load_config_or_default, write_config},
     discovery::{AutoDiscovery, DiscoveredServer, DiscoverySource},
 };
 
@@ -64,7 +65,7 @@ pub async fn run_setup_command(yes: bool, output: &Path, configure_client: bool)
     }
 
     // ── 3. Merge into config ───────────────────────────────────────────────
-    let mut config = load_or_default_config(output);
+    let mut config = load_config_or_default(output);
     let added = merge_servers_into_config(&mut config, &selected);
 
     if let Err(e) = write_config(output, &config) {
@@ -193,17 +194,6 @@ fn interactive_select(servers: &[DiscoveredServer]) -> Result<Vec<&DiscoveredSer
 
 // ── Config mutation ────────────────────────────────────────────────────────────
 
-fn load_or_default_config(path: &Path) -> Config {
-    if path.exists() {
-        Config::load(Some(path)).unwrap_or_else(|e| {
-            eprintln!("Warning: Could not load existing config ({e}); starting fresh.");
-            Config::default()
-        })
-    } else {
-        Config::default()
-    }
-}
-
 /// Merge selected servers into `config.backends`, skipping duplicates.
 ///
 /// Returns the number of newly-added backends.
@@ -221,12 +211,6 @@ fn merge_servers_into_config(config: &mut Config, selected: &[&DiscoveredServer]
         added += 1;
     }
     added
-}
-
-fn write_config(path: &Path, config: &Config) -> Result<(), String> {
-    let yaml =
-        serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-    std::fs::write(path, yaml).map_err(|e| format!("{e}"))
 }
 
 // ── AI client configuration ────────────────────────────────────────────────────

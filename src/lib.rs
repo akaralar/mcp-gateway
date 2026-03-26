@@ -31,6 +31,7 @@ pub mod capability;
 pub mod chains;
 pub mod cli;
 pub mod config;
+pub mod config_persistence;
 pub mod config_reload;
 pub mod context_compression;
 pub mod cost_accounting;

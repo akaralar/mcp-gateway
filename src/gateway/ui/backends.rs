@@ -11,7 +11,6 @@
 //! hot-reload after a successful change.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path as AxumPath, Query, State};
@@ -22,8 +21,16 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::is_admin;
-use crate::config::{BackendConfig, Config, TransportConfig};
+use super::{
+    backend_ops::{
+        BackendUpdate, add_backend as add_backend_config, load_config_or_default,
+        remove_backend as remove_backend_config, resolve_transport,
+        update_backend as update_backend_config,
+    },
+    is_admin,
+};
+use crate::config::TransportConfig;
+use crate::config_persistence::write_config_and_reload;
 use crate::gateway::auth::AuthenticatedClient;
 use crate::gateway::router::AppState;
 use crate::registry::server_registry;
@@ -179,8 +186,8 @@ async fn add_backend(
     };
 
     // Load current config and check for duplicates
-    let mut config = load_config(config_path);
-    if config.backends.contains_key(&req.name) {
+    let mut config = load_config_or_default(config_path);
+    if add_backend_config(&mut config, &req.name, transport, description, req.env).is_err() {
         return (
             StatusCode::CONFLICT,
             Json(json!({"error": format!("Backend '{}' already exists", req.name)})),
@@ -188,18 +195,14 @@ async fn add_backend(
             .into_response();
     }
 
-    // Build and insert new backend
-    let backend = BackendConfig {
-        description,
-        enabled: true,
-        transport,
-        env: req.env,
-        ..Default::default()
-    };
-    config.backends.insert(req.name.clone(), backend);
-
     // Persist and reload
-    if let Err(e) = write_and_reload(&state, config_path, &config).await {
+    if let Err(e) = write_config_and_reload(
+        config_path,
+        &config,
+        state.meta_mcp.reload_context().as_deref(),
+    )
+    .await
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
@@ -235,8 +238,8 @@ async fn remove_backend(
             .into_response();
     };
 
-    let mut config = load_config(config_path);
-    if config.backends.remove(&name).is_none() {
+    let mut config = load_config_or_default(config_path);
+    if remove_backend_config(&mut config, &name).is_err() {
         return (
             StatusCode::NOT_FOUND,
             Json(json!({"error": format!("Backend '{}' not found", name)})),
@@ -244,7 +247,13 @@ async fn remove_backend(
             .into_response();
     }
 
-    if let Err(e) = write_and_reload(&state, config_path, &config).await {
+    if let Err(e) = write_config_and_reload(
+        config_path,
+        &config,
+        state.meta_mcp.reload_context().as_deref(),
+    )
+    .await
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
@@ -278,8 +287,16 @@ async fn update_backend(
             .into_response();
     };
 
+    let UpdateBackendRequest {
+        command,
+        url,
+        description,
+        env,
+        enabled,
+    } = req;
+
     // Validate: only one of command/url may be specified
-    if req.command.is_some() && req.url.is_some() {
+    if command.is_some() && url.is_some() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(json!({"error": "Provide either 'command' or 'url', not both"})),
@@ -287,7 +304,7 @@ async fn update_backend(
             .into_response();
     }
 
-    let mut config = load_config(config_path);
+    let mut config = load_config_or_default(config_path);
     if !config.backends.contains_key(&name) {
         return (
             StatusCode::NOT_FOUND,
@@ -296,39 +313,57 @@ async fn update_backend(
             .into_response();
     }
 
-    // Apply partial updates inside a scope to release the mutable borrow
-    {
-        let backend = config.backends.get_mut(&name).expect("checked above");
-
-        if let Some(desc) = req.description {
-            backend.description = desc;
-        }
-        if let Some(enabled) = req.enabled {
-            backend.enabled = enabled;
-        }
-        // Transport update
-        if let Some(cmd) = req.command {
-            backend.transport = TransportConfig::Stdio {
-                command: cmd,
-                cwd: None,
-                protocol_version: None,
-            };
-        } else if let Some(url) = req.url {
-            backend.transport = TransportConfig::Http {
-                http_url: url,
+    let transport = command
+        .map(|command| TransportConfig::Stdio {
+            command,
+            cwd: None,
+            protocol_version: None,
+        })
+        .or_else(|| {
+            url.map(|http_url| TransportConfig::Http {
+                http_url,
                 streamable_http: false,
                 protocol_version: None,
-            };
-        }
-        // Merge env vars
-        if let Some(env_patch) = req.env {
-            for (k, v) in env_patch {
-                backend.env.insert(k, v);
-            }
-        }
-    } // mutable borrow released here
+            })
+        });
 
-    if let Err(e) = write_and_reload(&state, config_path, &config).await {
+    let env = env.map(|env_patch| {
+        let mut merged = config
+            .backends
+            .get(&name)
+            .expect("checked above")
+            .env
+            .clone();
+        merged.extend(env_patch);
+        merged
+    });
+
+    if update_backend_config(
+        &mut config,
+        &name,
+        BackendUpdate {
+            description,
+            env,
+            enabled,
+            transport,
+        },
+    )
+    .is_err()
+    {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("Backend '{}' not found", name)})),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = write_config_and_reload(
+        config_path,
+        &config,
+        state.meta_mcp.reload_context().as_deref(),
+    )
+    .await
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e}))).into_response();
     }
 
@@ -408,102 +443,6 @@ fn validate_backend_name(name: &str) -> Result<(), String> {
                 .to_string(),
         );
     }
-    Ok(())
-}
-
-/// Resolve transport config from explicit flags or registry.
-fn resolve_transport(
-    name: &str,
-    cmd: Option<&str>,
-    url: Option<&str>,
-    desc: Option<&str>,
-) -> Result<(TransportConfig, String), String> {
-    // Explicit command takes priority.
-    if let Some(command) = cmd {
-        return Ok((
-            TransportConfig::Stdio {
-                command: command.to_string(),
-                cwd: None,
-                protocol_version: None,
-            },
-            desc.unwrap_or("").to_string(),
-        ));
-    }
-
-    // Explicit URL.
-    if let Some(http_url) = url {
-        return Ok((
-            TransportConfig::Http {
-                http_url: http_url.to_string(),
-                streamable_http: false,
-                protocol_version: None,
-            },
-            desc.unwrap_or("").to_string(),
-        ));
-    }
-
-    // Registry lookup.
-    if let Some(entry) = server_registry::lookup(name) {
-        let transport = match entry.transport {
-            server_registry::Transport::Stdio => TransportConfig::Stdio {
-                command: entry.command.to_string(),
-                cwd: None,
-                protocol_version: None,
-            },
-            server_registry::Transport::Http { default_url } => TransportConfig::Http {
-                http_url: default_url.to_string(),
-                streamable_http: false,
-                protocol_version: None,
-            },
-        };
-        return Ok((transport, desc.unwrap_or(entry.description).to_string()));
-    }
-
-    Err(format!(
-        "'{name}' is not in the built-in registry. Provide 'command' or 'url'."
-    ))
-}
-
-/// Load the gateway config from disk, returning a default on error.
-fn load_config(path: &Path) -> Config {
-    if path.exists() {
-        Config::load(Some(path)).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "Could not load config, using defaults");
-            Config::default()
-        })
-    } else {
-        Config::default()
-    }
-}
-
-/// Serialize `config` to YAML, write to `path`, then trigger hot-reload via
-/// the `ReloadContext` stored in the gateway's `MetaMcp`.
-///
-/// # Errors
-///
-/// Returns an error string on serialization, write, or reload failure.
-async fn write_and_reload(
-    state: &Arc<AppState>,
-    path: &Path,
-    config: &Config,
-) -> Result<(), String> {
-    // Serialize
-    let yaml =
-        serde_yaml::to_string(config).map_err(|e| format!("Failed to serialize config: {e}"))?;
-
-    // Write atomically via a temp file + rename to minimize window of corruption
-    let tmp_path = path.with_extension("yaml.tmp");
-    std::fs::write(&tmp_path, &yaml).map_err(|e| format!("Failed to write temp config: {e}"))?;
-    std::fs::rename(&tmp_path, path).map_err(|e| format!("Failed to rename config file: {e}"))?;
-
-    // Trigger hot-reload via ReloadContext if available
-    if let Some(ctx) = state.meta_mcp.reload_context() {
-        ctx.reload()
-            .await
-            .map_err(|e| format!("Config written but reload failed: {e}"))?;
-    }
-    // If no ReloadContext is present the file-watcher will pick up the change.
-
     Ok(())
 }
 
