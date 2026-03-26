@@ -1,9 +1,42 @@
 //! Pure utility functions shared by router handlers.
 
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    http::{HeaderValue, StatusCode},
+    response::IntoResponse,
+};
+use serde::Serialize;
 use serde_json::{Value, json};
+use tracing::warn;
 
-use crate::protocol::{JsonRpcResponse, RequestId, SamplingCreateMessageParams};
+use crate::protocol::{
+    ElicitationCreateParams, JsonRpcResponse, RequestId, SamplingCreateMessageParams,
+};
+
+fn build_session_response<T>(
+    body: T,
+    session_id: &str,
+    status: StatusCode,
+) -> axum::response::Response
+where
+    T: Serialize,
+{
+    let mut resp = Json(body).into_response();
+
+    match HeaderValue::from_str(session_id) {
+        Ok(value) => {
+            resp.headers_mut().insert(
+                axum::http::header::HeaderName::from_static("mcp-session-id"),
+                value,
+            );
+        }
+        Err(err) => {
+            warn!(%session_id, %err, "failed to set mcp-session-id response header");
+        }
+    }
+
+    (status, resp).into_response()
+}
 
 /// Build an HTTP response with a `mcp-session-id` header from an arbitrary JSON body.
 pub(super) fn build_json_response(
@@ -11,12 +44,7 @@ pub(super) fn build_json_response(
     session_id: &str,
     status: StatusCode,
 ) -> axum::response::Response {
-    let mut resp = Json(body).into_response();
-    resp.headers_mut().insert(
-        axum::http::header::HeaderName::from_static("mcp-session-id"),
-        session_id.parse().unwrap(),
-    );
-    (status, resp).into_response()
+    build_session_response(body, session_id, status)
 }
 
 /// Build an HTTP response with a `mcp-session-id` header and a given status.
@@ -25,7 +53,7 @@ pub(super) fn build_response(
     session_id: &str,
     status: StatusCode,
 ) -> axum::response::Response {
-    build_json_response(serde_json::to_value(rpc).unwrap(), session_id, status)
+    build_session_response(rpc, session_id, status)
 }
 
 /// Build a JSON-RPC error response with a `mcp-session-id` header and status.
@@ -66,6 +94,31 @@ pub(super) fn parse_sampling_params(
     serde_json::from_value(p).map_err(|e| {
         build_response(
             JsonRpcResponse::error(Some(id), -32602, format!("Invalid sampling params: {e}")),
+            session_id,
+            StatusCode::BAD_REQUEST,
+        )
+    })
+}
+
+/// Parse `elicitation/create` params from raw JSON, returning an early HTTP
+/// error response on failure.
+#[allow(clippy::result_large_err)] // early-return pattern mirrors existing handlers
+pub(super) fn parse_elicitation_params(
+    id: RequestId,
+    params: Option<Value>,
+    session_id: &str,
+) -> Result<ElicitationCreateParams, axum::response::Response> {
+    let Some(p) = params else {
+        return Err(build_response(
+            JsonRpcResponse::error(Some(id), -32602, "Missing elicitation params"),
+            session_id,
+            StatusCode::BAD_REQUEST,
+        ));
+    };
+
+    serde_json::from_value(p).map_err(|e| {
+        build_response(
+            JsonRpcResponse::error(Some(id), -32602, format!("Invalid elicitation params: {e}")),
             session_id,
             StatusCode::BAD_REQUEST,
         )
