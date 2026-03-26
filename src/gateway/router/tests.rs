@@ -1,6 +1,6 @@
 use super::helpers::{
-    build_accepted_response, build_error_response, extract_request_id, extract_tools_call_params,
-    is_notification_method, parse_request,
+    build_accepted_response, build_error_response, build_json_response, extract_request_id,
+    extract_tools_call_params, is_notification_method, parse_elicitation_params, parse_request,
 };
 use crate::protocol::RequestId;
 use axum::{body::to_bytes, http::StatusCode};
@@ -325,4 +325,54 @@ async fn build_accepted_response_sets_status_session_header_and_empty_body() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json, json!({}));
+}
+
+#[tokio::test]
+async fn build_json_response_skips_invalid_session_header_without_panicking() {
+    let response = build_json_response(json!({"ok": true}), "sess\n123", StatusCode::OK);
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().get("mcp-session-id").is_none());
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json, json!({"ok": true}));
+}
+
+#[tokio::test]
+async fn parse_elicitation_params_missing_returns_bad_request_with_session_header() {
+    let response = parse_elicitation_params(RequestId::Number(9), None, "sess-elicit").unwrap_err();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.headers()["mcp-session-id"], "sess-elicit");
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], -32602);
+    assert_eq!(json["error"]["message"], "Missing elicitation params");
+    assert_eq!(json["id"], json!(9));
+}
+
+#[tokio::test]
+async fn parse_elicitation_params_invalid_returns_bad_request_with_context() {
+    let response = parse_elicitation_params(
+        RequestId::String("req-1".to_string()),
+        Some(json!({"message": 42})),
+        "sess-elicit",
+    )
+    .unwrap_err();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.headers()["mcp-session-id"], "sess-elicit");
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], -32602);
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Invalid elicitation params:")
+    );
+    assert_eq!(json["id"], json!("req-1"));
 }

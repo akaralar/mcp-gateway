@@ -14,12 +14,12 @@ use tracing::{debug, info, warn};
 use super::AppState;
 use super::helpers::{
     build_accepted_response, build_error_response, build_response, extract_tools_call_params,
-    parse_request, parse_sampling_params,
+    parse_elicitation_params, parse_request, parse_sampling_params,
 };
 use crate::gateway::auth::AuthenticatedClient;
 use crate::gateway::streaming::create_sse_response;
 use crate::mtls::CertIdentity;
-use crate::protocol::{ElicitationCreateParams, JsonRpcResponse};
+use crate::protocol::JsonRpcResponse;
 #[cfg(feature = "firewall")]
 use crate::security::firewall::FirewallAction;
 use crate::security::{sanitize_json_value, validate_url_not_ssrf};
@@ -599,28 +599,10 @@ pub(super) async fn meta_mcp_handler(
         }
 
         "elicitation/create" => {
-            let elicitation_params: ElicitationCreateParams = match params {
-                Some(p) => match serde_json::from_value(p) {
-                    Ok(ep) => ep,
-                    Err(e) => {
-                        return build_error_response(
-                            Some(id),
-                            -32602,
-                            format!("Invalid elicitation params: {e}"),
-                            &session_id,
-                            StatusCode::OK,
-                        );
-                    }
-                },
-                None => {
-                    return build_error_response(
-                        Some(id),
-                        -32602,
-                        "Missing elicitation params",
-                        &session_id,
-                        StatusCode::OK,
-                    );
-                }
+            let elicitation_params = match parse_elicitation_params(id.clone(), params, &session_id)
+            {
+                Ok(p) => p,
+                Err(resp) => return resp,
             };
 
             // Broadcast to all sessions — first responder wins.
