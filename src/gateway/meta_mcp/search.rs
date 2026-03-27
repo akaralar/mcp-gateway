@@ -12,9 +12,9 @@ use crate::{Error, Result};
 use super::super::differential::annotate_differential;
 use super::super::meta_mcp_helpers::{
     build_code_mode_match_json, build_match_json, build_match_json_with_chains,
-    build_search_response, build_suggestions, extract_required_str, extract_search_limit,
-    is_glob_pattern, parse_code_mode_tool_ref, parse_tool_arguments, ranked_results_to_json,
-    tool_matches_glob, tool_matches_query,
+    build_search_response, build_suggestions, extract_bool_or, extract_optional_str,
+    extract_required_str, extract_search_limit, is_glob_pattern, parse_code_mode_tool_ref,
+    parse_tool_arguments, ranked_results_to_json, tool_matches_glob, tool_matches_query,
 };
 use super::MetaMcp;
 use super::support::{
@@ -37,10 +37,7 @@ impl MetaMcp {
         let raw_query = extract_required_str(args, "query")?;
         let query = raw_query.to_lowercase();
         let limit = extract_search_limit(args);
-        let include_schema = args
-            .get("include_schema")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
+        let include_schema = extract_bool_or(args, "include_schema", true);
         let profile = self.active_profile(session_id);
         let use_glob = is_glob_pattern(&query);
 
@@ -196,7 +193,7 @@ impl MetaMcp {
         let mut results: Vec<Value> = Vec::with_capacity(chain.len());
 
         for (idx, step) in chain.iter().enumerate() {
-            let tool_ref = step.get("tool").and_then(Value::as_str).ok_or_else(|| {
+            let tool_ref = extract_optional_str(step, "tool").ok_or_else(|| {
                 Error::json_rpc(-32602, format!("Chain step {idx}: missing 'tool' field"))
             })?;
 
@@ -250,7 +247,7 @@ impl MetaMcp {
         let profile = self.active_profile(session_id);
 
         // If server is specified, return tools from that single backend (existing behavior)
-        if let Some(server) = args.get("server").and_then(Value::as_str) {
+        if let Some(server) = extract_optional_str(args, "server") {
             let killed = self.kill_switch.is_killed(server);
 
             // Backend-level profile check for single-server queries

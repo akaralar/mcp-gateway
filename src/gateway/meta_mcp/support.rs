@@ -9,6 +9,7 @@ use crate::Result;
 use crate::idempotency::{IdempotencyCache, derive_key};
 use crate::playbook::ToolInvoker;
 
+use super::super::meta_mcp_helpers::extract_optional_str;
 use super::MetaMcp;
 
 // ============================================================================
@@ -33,7 +34,7 @@ pub(super) fn resolve_idempotency_key(
 ) -> Option<String> {
     idem_cache?;
     // Explicit key takes precedence.
-    if let Some(key) = args.get("idempotency_key").and_then(Value::as_str) {
+    if let Some(key) = extract_optional_str(args, "idempotency_key") {
         return Some(key.to_string());
     }
     // Auto-derive from (server, tool, arguments) — stable, deterministic.

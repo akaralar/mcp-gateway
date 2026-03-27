@@ -95,10 +95,44 @@ pub(crate) fn did_you_mean(
 ///
 /// Returns `"2024-11-05"` when params are `None` or missing `protocolVersion`.
 pub(crate) fn extract_client_version(params: Option<&Value>) -> &str {
-    params
-        .and_then(|p| p.get("protocolVersion"))
-        .and_then(Value::as_str)
-        .unwrap_or("2024-11-05")
+    extract_nested_optional_str(params, "protocolVersion").unwrap_or("2024-11-05")
+}
+
+/// Extract an optional string field from a JSON object.
+pub(crate) fn extract_optional_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
+    args.get(key).and_then(Value::as_str)
+}
+
+/// Extract an optional nested string field from optional params.
+pub(crate) fn extract_nested_optional_str<'a>(
+    params: Option<&'a Value>,
+    key: &str,
+) -> Option<&'a str> {
+    params.and_then(|p| extract_optional_str(p, key))
+}
+
+/// Build a standard invalid-params response for a missing top-level string parameter.
+pub(crate) fn missing_parameter_response(id: &RequestId, key: &str) -> JsonRpcResponse {
+    JsonRpcResponse::error(
+        Some(id.clone()),
+        -32602,
+        format!("Missing '{key}' parameter"),
+    )
+}
+
+/// Extract an optional boolean parameter, defaulting when missing or wrong type.
+pub(crate) fn extract_bool_or(args: &Value, key: &str, default: bool) -> bool {
+    args.get(key).and_then(Value::as_bool).unwrap_or(default)
+}
+
+/// Extract an optional unsigned integer parameter, defaulting when missing or wrong type.
+pub(crate) fn extract_u64_or(args: &Value, key: &str, default: u64) -> u64 {
+    args.get(key).and_then(Value::as_u64).unwrap_or(default)
+}
+
+/// Extract an optional floating-point parameter, defaulting when missing or wrong type.
+pub(crate) fn extract_f64_or(args: &Value, key: &str, default: f64) -> f64 {
+    args.get(key).and_then(Value::as_f64).unwrap_or(default)
 }
 
 /// Build the `InitializeResult` for a given negotiated protocol version.
@@ -498,13 +532,12 @@ pub(crate) fn build_search_response(
 /// Extract the search limit from arguments, defaulting to 10.
 #[allow(clippy::cast_possible_truncation)]
 pub(crate) fn extract_search_limit(args: &Value) -> usize {
-    args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize
+    extract_u64_or(args, "limit", 10) as usize
 }
 
 /// Extract a required string parameter from JSON arguments.
 pub(crate) fn extract_required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
-    args.get(key)
-        .and_then(Value::as_str)
+    extract_optional_str(args, key)
         .ok_or_else(|| Error::json_rpc(-32602, format!("Missing '{key}' parameter")))
 }
 
@@ -535,9 +568,7 @@ pub(crate) fn parse_tool_arguments(args: &Value) -> Result<Value> {
 
 /// Extract the price per million from stats arguments, defaulting to 15.0.
 pub(crate) fn extract_price_per_million(args: &Value) -> f64 {
-    args.get("price_per_million")
-        .and_then(Value::as_f64)
-        .unwrap_or(15.0)
+    extract_f64_or(args, "price_per_million", 15.0)
 }
 
 /// Build the stats response JSON from a snapshot.

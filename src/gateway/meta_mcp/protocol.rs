@@ -15,6 +15,7 @@ use crate::protocol::{
     PromptMessage, PromptsListResult, RequestId,
 };
 
+use super::super::meta_mcp_helpers::{extract_nested_optional_str, missing_parameter_response};
 use super::MetaMcp;
 
 // ============================================================================
@@ -110,17 +111,13 @@ fn try_serve_gateway_prompt(
 ) -> Option<JsonRpcResponse> {
     let messages = match name {
         "gateway/gateway-discover" => {
-            let task = arguments
-                .and_then(|a| a.get("task"))
-                .and_then(Value::as_str)
-                .unwrap_or("complete the task");
+            let task =
+                extract_nested_optional_str(arguments, "task").unwrap_or("complete the task");
             discover_prompt_messages(task)
         }
         "gateway/gateway-compose" => {
-            let goal = arguments
-                .and_then(|a| a.get("goal"))
-                .and_then(Value::as_str)
-                .unwrap_or("accomplish the goal");
+            let goal =
+                extract_nested_optional_str(arguments, "goal").unwrap_or("accomplish the goal");
             compose_prompt_messages(goal)
         }
         _ => return None,
@@ -184,8 +181,8 @@ impl MetaMcp {
         id: RequestId,
         params: Option<&Value>,
     ) -> JsonRpcResponse {
-        let Some(name) = params.and_then(|p| p.get("name")).and_then(Value::as_str) else {
-            return JsonRpcResponse::error(Some(id), -32602, "Missing 'name' parameter");
+        let Some(name) = extract_nested_optional_str(params, "name") else {
+            return missing_parameter_response(&id, "name");
         };
 
         // Gateway-owned meta-prompts are served inline — no backend round-trip.

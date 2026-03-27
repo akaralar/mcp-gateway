@@ -26,6 +26,7 @@ use crate::protocol::{
 };
 use crate::security::sanitize_resource_metadata;
 
+use super::super::meta_mcp_helpers::{extract_nested_optional_str, missing_parameter_response};
 use super::MetaMcp;
 
 // ============================================================================
@@ -256,8 +257,8 @@ impl MetaMcp {
         id: RequestId,
         params: Option<&Value>,
     ) -> JsonRpcResponse {
-        let Some(uri) = params.and_then(|p| p.get("uri")).and_then(Value::as_str) else {
-            return JsonRpcResponse::error(Some(id), -32602, "Missing 'uri' parameter");
+        let Some(uri) = extract_nested_optional_str(params, "uri") else {
+            return missing_parameter_response(&id, "uri");
         };
 
         // Gateway-owned guides are served inline — no backend round-trip.
@@ -325,8 +326,8 @@ impl MetaMcp {
         id: RequestId,
         params: Option<&Value>,
     ) -> JsonRpcResponse {
-        let Some(uri) = params.and_then(|p| p.get("uri")).and_then(Value::as_str) else {
-            return JsonRpcResponse::error(Some(id), -32602, "Missing 'uri' parameter");
+        let Some(uri) = extract_nested_optional_str(params, "uri") else {
+            return missing_parameter_response(&id, "uri");
         };
 
         let Some(backend) = self.find_resource_owner(uri).await else {
@@ -358,8 +359,8 @@ impl MetaMcp {
         id: RequestId,
         params: Option<&Value>,
     ) -> JsonRpcResponse {
-        let Some(uri) = params.and_then(|p| p.get("uri")).and_then(Value::as_str) else {
-            return JsonRpcResponse::error(Some(id), -32602, "Missing 'uri' parameter");
+        let Some(uri) = extract_nested_optional_str(params, "uri") else {
+            return missing_parameter_response(&id, "uri");
         };
 
         let Some(backend) = self.find_resource_owner(uri).await else {
