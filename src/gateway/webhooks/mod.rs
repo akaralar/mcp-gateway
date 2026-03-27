@@ -9,20 +9,20 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
-    Json, Router,
+    Router,
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::IntoResponse,
     routing::{MethodFilter, on},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
 use hmac::Mac as _;
 use sha2::Sha256;
 
-use self::errors::{invalid_json, invalid_signature, transformation_failed};
+use self::errors::{invalid_json, invalid_signature, transformation_failed, webhook_success};
 use super::streaming::{NotificationMultiplexer, TaggedNotification};
 use crate::capability::{CapabilityDefinition, WebhookDefinition};
 use crate::config::WebhookConfig;
@@ -321,15 +321,7 @@ async fn webhook_handler(
         );
     }
 
-    (
-        StatusCode::OK,
-        Json(json!({
-            "status": "received",
-            "request_id": request_id,
-            "notified": state.definition.notify,
-            "sessions": session_count
-        })),
-    )
+    webhook_success(&request_id, state.definition.notify, session_count)
 }
 
 // ============================================================================

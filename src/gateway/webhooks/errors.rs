@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::http::StatusCode;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::gateway::http_error::{json_body, request_scoped_error_body};
 
@@ -28,6 +28,22 @@ pub(super) fn transformation_failed(request_id: &str) -> (StatusCode, Json<Value
         StatusCode::INTERNAL_SERVER_ERROR,
         "Transformation failed",
         request_id,
+    )
+}
+
+pub(super) fn webhook_success(
+    request_id: &str,
+    notified: bool,
+    sessions: usize,
+) -> (StatusCode, Json<Value>) {
+    json_body(
+        StatusCode::OK,
+        json!({
+            "status": "received",
+            "request_id": request_id,
+            "notified": notified,
+            "sessions": sessions,
+        }),
     )
 }
 
@@ -71,6 +87,21 @@ mod tests {
             json!({
                 "error": "Transformation failed",
                 "request_id": "req-789",
+            })
+        );
+    }
+
+    #[test]
+    fn webhook_success_shape_is_stable() {
+        let (status, body) = webhook_success("req-999", true, 3);
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            body.0,
+            json!({
+                "status": "received",
+                "request_id": "req-999",
+                "notified": true,
+                "sessions": 3,
             })
         );
     }
