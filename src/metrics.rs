@@ -19,16 +19,23 @@ static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 /// and server startup can both call this without panicking.
 #[cfg(feature = "metrics")]
 pub fn install() {
+    if HANDLE.get().is_some() {
+        return;
+    }
+
     match metrics_exporter_prometheus::PrometheusBuilder::new().install_recorder() {
         Ok(handle) => {
-            let _ = HANDLE.set(handle);
-            tracing::info!("Prometheus metrics recorder installed; scrape at /metrics");
+            if HANDLE.set(handle).is_ok() {
+                tracing::info!("Prometheus metrics recorder installed; scrape at /metrics");
+            }
         }
         Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "Failed to install Prometheus recorder; /metrics will return empty output"
-            );
+            if HANDLE.get().is_none() {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to install Prometheus recorder; /metrics will return empty output"
+                );
+            }
         }
     }
 }
