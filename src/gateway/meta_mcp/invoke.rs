@@ -6,6 +6,7 @@
 //! `gateway_webhook_status`, and `gateway_run_playbook`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use serde_json::{Value, json};
 use tracing::{debug, warn};
@@ -122,6 +123,12 @@ impl MetaMcp {
                     if let Some(ref stats) = self.stats {
                         stats.record_cache_hit();
                     }
+                    metrics::counter!(
+                        "mcp_cache_hits_total",
+                        "server" => server.to_owned(),
+                        "kind" => "idempotency"
+                    )
+                    .increment(1);
                     let predictions = self.record_and_predict(session_id, &tool_key);
                     return Ok(augment_with_trace(
                         augment_with_predictions(cached, predictions),
@@ -144,6 +151,12 @@ impl MetaMcp {
                 if let Some(ref stats) = self.stats {
                     stats.record_cache_hit();
                 }
+                metrics::counter!(
+                    "mcp_cache_hits_total",
+                    "server" => server.to_owned(),
+                    "kind" => "response"
+                )
+                .increment(1);
                 if let (Some(idem_cache), Some(key)) = (&self.idempotency_cache, &idem_key) {
                     idem_cache.mark_completed(key, cached.clone());
                 }
@@ -201,9 +214,22 @@ impl MetaMcp {
                 })
             });
 
+        let dispatch_start = Instant::now();
         let dispatch_result = self
             .dispatch_to_backend(server, tool, arguments.clone(), prompt_cache_key.as_deref())
             .await;
+        let dispatch_latency = dispatch_start.elapsed();
+        metrics::counter!(
+            "mcp_tool_invocations_total",
+            "server" => server.to_owned(),
+            "status" => if dispatch_result.is_ok() { "ok" } else { "error" }
+        )
+        .increment(1);
+        metrics::histogram!(
+            "mcp_tool_invocation_duration_seconds",
+            "server" => server.to_owned()
+        )
+        .record(dispatch_latency.as_secs_f64());
 
         // Record prompt-cached tokens from the backend response (if any)
         if let Ok(ref response) = dispatch_result {
