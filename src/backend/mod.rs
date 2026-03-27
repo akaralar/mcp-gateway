@@ -480,7 +480,7 @@ impl Backend {
 
         // Check failsafe
         if !self.failsafe.can_proceed() {
-            metrics::gauge!(
+            telemetry_metrics::gauge!(
                 "mcp_backend_circuit_state",
                 "backend" => self.name.clone()
             )
@@ -488,7 +488,7 @@ impl Backend {
             tracing::warn!(backend = %self.name, "Request rejected by circuit breaker");
             return Err(Error::CircuitOpen(self.name.clone()));
         }
-        metrics::gauge!(
+        telemetry_metrics::gauge!(
             "mcp_backend_circuit_state",
             "backend" => self.name.clone()
         )
@@ -536,7 +536,7 @@ impl Backend {
                     "Request completed successfully"
                 );
                 self.failsafe.record_success(latency);
-                metrics::counter!(
+                telemetry_metrics::counter!(
                     "mcp_backend_requests_total",
                     "backend" => self.name.clone(),
                     "status" => "ok"
@@ -546,7 +546,7 @@ impl Backend {
             Err(e) => {
                 tracing::error!(error = %e, latency_ms = latency.as_millis(), "Request failed");
                 self.failsafe.record_failure();
-                metrics::counter!(
+                telemetry_metrics::counter!(
                     "mcp_backend_requests_total",
                     "backend" => self.name.clone(),
                     "status" => "error"
@@ -554,7 +554,7 @@ impl Backend {
                 .increment(1);
             }
         }
-        metrics::histogram!(
+        telemetry_metrics::histogram!(
             "mcp_backend_request_duration_seconds",
             "backend" => self.name.clone()
         )

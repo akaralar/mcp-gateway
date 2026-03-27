@@ -453,8 +453,8 @@ impl MetaMcp {
             #[allow(clippy::cast_possible_truncation)]
             stats.record_search(total_found as u64);
         }
-        metrics::counter!("mcp_search_total").increment(1);
-        metrics::histogram!("mcp_search_duration_seconds")
+        telemetry_metrics::counter!("mcp_search_total").increment(1);
+        telemetry_metrics::histogram!("mcp_search_duration_seconds")
             .record(search_start.elapsed().as_secs_f64());
 
         // Apply ranking if enabled, then truncate to limit

@@ -123,7 +123,7 @@ impl MetaMcp {
                     if let Some(ref stats) = self.stats {
                         stats.record_cache_hit();
                     }
-                    metrics::counter!(
+                    telemetry_metrics::counter!(
                         "mcp_cache_hits_total",
                         "server" => server.to_owned(),
                         "kind" => "idempotency"
@@ -151,7 +151,7 @@ impl MetaMcp {
                 if let Some(ref stats) = self.stats {
                     stats.record_cache_hit();
                 }
-                metrics::counter!(
+                telemetry_metrics::counter!(
                     "mcp_cache_hits_total",
                     "server" => server.to_owned(),
                     "kind" => "response"
@@ -219,13 +219,13 @@ impl MetaMcp {
             .dispatch_to_backend(server, tool, arguments.clone(), prompt_cache_key.as_deref())
             .await;
         let dispatch_latency = dispatch_start.elapsed();
-        metrics::counter!(
+        telemetry_metrics::counter!(
             "mcp_tool_invocations_total",
             "server" => server.to_owned(),
             "status" => if dispatch_result.is_ok() { "ok" } else { "error" }
         )
         .increment(1);
-        metrics::histogram!(
+        telemetry_metrics::histogram!(
             "mcp_tool_invocation_duration_seconds",
             "server" => server.to_owned()
         )
