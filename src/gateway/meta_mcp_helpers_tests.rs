@@ -39,6 +39,90 @@ fn extract_client_version_returns_default_when_not_string() {
     assert_eq!(extract_client_version(Some(&params)), "2024-11-05");
 }
 
+// ── extract_optional_str ─────────────────────────────────────────────
+
+#[test]
+fn extract_optional_str_returns_value_when_present() {
+    let args = json!({"server": "backend-1"});
+    assert_eq!(extract_optional_str(&args, "server"), Some("backend-1"));
+}
+
+#[test]
+fn extract_optional_str_returns_none_for_missing_or_non_string() {
+    assert_eq!(extract_optional_str(&json!({}), "server"), None);
+    assert_eq!(extract_optional_str(&json!({"server": 42}), "server"), None);
+}
+
+// ── extract_nested_optional_str ──────────────────────────────────────
+
+#[test]
+fn extract_nested_optional_str_returns_value_when_present() {
+    let params = json!({"uri": "gateway://guides/quickstart"});
+    assert_eq!(
+        extract_nested_optional_str(Some(&params), "uri"),
+        Some("gateway://guides/quickstart")
+    );
+}
+
+#[test]
+fn extract_nested_optional_str_returns_none_for_missing_params_or_key() {
+    assert_eq!(extract_nested_optional_str(None, "uri"), None);
+    assert_eq!(extract_nested_optional_str(Some(&json!({})), "uri"), None);
+}
+
+// ── missing_parameter_response ───────────────────────────────────────
+
+#[test]
+fn missing_parameter_response_preserves_invalid_params_contract() {
+    let response = missing_parameter_response(&RequestId::Number(7), "uri");
+    let error = response.error.expect("expected JSON-RPC error");
+    assert_eq!(error.code, -32602);
+    assert_eq!(error.message, "Missing 'uri' parameter");
+}
+
+// ── extract_bool_or ──────────────────────────────────────────────────
+
+#[test]
+fn extract_bool_or_respects_custom_value_and_default() {
+    assert!(extract_bool_or(&json!({"enabled": true}), "enabled", false));
+    assert!(extract_bool_or(&json!({}), "enabled", true));
+}
+
+#[test]
+fn extract_bool_or_ignores_non_bool_values() {
+    assert!(!extract_bool_or(
+        &json!({"enabled": "yes"}),
+        "enabled",
+        false
+    ));
+}
+
+// ── extract_u64_or ───────────────────────────────────────────────────
+
+#[test]
+fn extract_u64_or_respects_custom_value_and_default() {
+    assert_eq!(extract_u64_or(&json!({"limit": 25}), "limit", 10), 25);
+    assert_eq!(extract_u64_or(&json!({}), "limit", 10), 10);
+}
+
+#[test]
+fn extract_u64_or_ignores_non_integer_values() {
+    assert_eq!(extract_u64_or(&json!({"limit": "many"}), "limit", 10), 10);
+}
+
+// ── extract_f64_or ───────────────────────────────────────────────────
+
+#[test]
+fn extract_f64_or_respects_custom_value_and_default() {
+    assert!((extract_f64_or(&json!({"price": 3.5}), "price", 15.0) - 3.5).abs() < f64::EPSILON);
+    assert!((extract_f64_or(&json!({}), "price", 15.0) - 15.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn extract_f64_or_ignores_non_number_values() {
+    assert!((extract_f64_or(&json!({"price": "free"}), "price", 15.0) - 15.0).abs() < f64::EPSILON);
+}
+
 // ── build_initialize_result ─────────────────────────────────────────
 
 const TEST_INSTRUCTIONS: &str = "test instructions";

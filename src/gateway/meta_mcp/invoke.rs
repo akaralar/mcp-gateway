@@ -21,7 +21,8 @@ use crate::{Error, Result};
 
 use super::super::meta_mcp_helpers::{
     build_circuit_breaker_stats_json, build_server_safety_status, build_stats_response,
-    did_you_mean, extract_price_per_million, extract_required_str, parse_tool_arguments,
+    did_you_mean, extract_bool_or, extract_optional_str, extract_price_per_million,
+    extract_required_str, parse_tool_arguments,
 };
 use super::super::trace;
 use super::MetaMcp;
@@ -467,20 +468,11 @@ impl MetaMcp {
         args: &Value,
         session_id: Option<&str>,
     ) -> Result<Value> {
-        let include_all_sessions = args
-            .get("include_all_sessions")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let include_all_keys = args
-            .get("include_all_keys")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        let include_all_sessions = extract_bool_or(args, "include_all_sessions", false);
+        let include_all_keys = extract_bool_or(args, "include_all_keys", false);
 
         // Resolve target session (explicit arg or current session)
-        let target_session_id = args
-            .get("session_id")
-            .and_then(Value::as_str)
-            .or(session_id);
+        let target_session_id = extract_optional_str(args, "session_id").or(session_id);
 
         let session_report = if include_all_sessions {
             serde_json::to_value(self.cost_tracker.all_sessions()).unwrap_or(json!([]))
