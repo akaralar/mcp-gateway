@@ -346,6 +346,92 @@ async fn webhook_handler_invalid_json_returns_flat_bad_request_with_request_id()
             .as_str()
             .is_some_and(|request_id| !request_id.is_empty())
     );
+    assert!(json.get("jsonrpc").is_none());
+}
+
+#[tokio::test]
+async fn webhook_handler_success_returns_received_status_with_request_id() {
+    let multiplexer = make_multiplexer();
+    let state = make_handler_state(multiplexer, make_definition(true));
+
+    let response = webhook_handler(
+        State(state),
+        HeaderMap::new(),
+        axum::body::Bytes::from_static(br#"{"event":"ok"}"#),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "received");
+    assert_eq!(json["notified"], true);
+    assert_eq!(json["sessions"], 0);
+    assert!(
+        json["request_id"]
+            .as_str()
+            .is_some_and(|request_id| !request_id.is_empty())
+    );
+    assert!(json.get("jsonrpc").is_none());
+}
+
+#[tokio::test]
+async fn webhook_handler_invalid_signature_returns_request_scoped_error() {
+    let multiplexer = make_multiplexer();
+    let mut definition = make_definition(true);
+    definition.secret = Some("super-secret".to_string());
+    definition.signature_header = Some("X-Signature".to_string());
+    let state = make_handler_state(multiplexer, definition);
+
+    let response = webhook_handler(
+        State(state),
+        HeaderMap::new(),
+        axum::body::Bytes::from_static(br#"{"event":"ok"}"#),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "Invalid signature");
+    assert!(
+        json["request_id"]
+            .as_str()
+            .is_some_and(|request_id| !request_id.is_empty())
+    );
+    assert!(json.get("jsonrpc").is_none());
+}
+
+#[tokio::test]
+async fn webhook_handler_transformation_failure_returns_request_scoped_error() {
+    let multiplexer = make_multiplexer();
+    let mut definition = make_definition(true);
+    definition.transform.event_type = Some("{missing.field}".to_string());
+    let state = make_handler_state(multiplexer, definition);
+
+    let response = webhook_handler(
+        State(state),
+        HeaderMap::new(),
+        axum::body::Bytes::from_static(br#"{"event":"ok"}"#),
+    )
+    .await
+    .into_response();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "Transformation failed");
+    assert!(
+        json["request_id"]
+            .as_str()
+            .is_some_and(|request_id| !request_id.is_empty())
+    );
+    assert!(json.get("jsonrpc").is_none());
 }
 
 // ── method_to_filter ──────────────────────────────────────────────────
