@@ -480,9 +480,19 @@ impl Backend {
 
         // Check failsafe
         if !self.failsafe.can_proceed() {
+            metrics::gauge!(
+                "mcp_backend_circuit_state",
+                "backend" => self.name.clone()
+            )
+            .set(0.0_f64);
             tracing::warn!(backend = %self.name, "Request rejected by circuit breaker");
             return Err(Error::CircuitOpen(self.name.clone()));
         }
+        metrics::gauge!(
+            "mcp_backend_circuit_state",
+            "backend" => self.name.clone()
+        )
+        .set(1.0_f64);
 
         // Acquire semaphore
         let _permit = self.semaphore.acquire().await.map_err(|_| {
@@ -526,12 +536,29 @@ impl Backend {
                     "Request completed successfully"
                 );
                 self.failsafe.record_success(latency);
+                metrics::counter!(
+                    "mcp_backend_requests_total",
+                    "backend" => self.name.clone(),
+                    "status" => "ok"
+                )
+                .increment(1);
             }
             Err(e) => {
                 tracing::error!(error = %e, latency_ms = latency.as_millis(), "Request failed");
                 self.failsafe.record_failure();
+                metrics::counter!(
+                    "mcp_backend_requests_total",
+                    "backend" => self.name.clone(),
+                    "status" => "error"
+                )
+                .increment(1);
             }
         }
+        metrics::histogram!(
+            "mcp_backend_request_duration_seconds",
+            "backend" => self.name.clone()
+        )
+        .record(latency.as_secs_f64());
 
         result
     }

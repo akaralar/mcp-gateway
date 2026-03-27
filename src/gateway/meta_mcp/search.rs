@@ -372,6 +372,7 @@ impl MetaMcp {
         let query = extract_required_str(args, "query")?.to_lowercase();
         let limit = extract_search_limit(args);
         let profile = self.active_profile(session_id);
+        let search_start = std::time::Instant::now();
 
         let mut matches = Vec::new();
         // Collect all available tags for suggestion generation (only used on zero-result queries).
@@ -452,6 +453,9 @@ impl MetaMcp {
             #[allow(clippy::cast_possible_truncation)]
             stats.record_search(total_found as u64);
         }
+        metrics::counter!("mcp_search_total").increment(1);
+        metrics::histogram!("mcp_search_duration_seconds")
+            .record(search_start.elapsed().as_secs_f64());
 
         // Apply ranking if enabled, then truncate to limit
         if let Some(ref ranker) = self.ranker {

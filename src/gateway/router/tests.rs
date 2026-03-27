@@ -542,3 +542,24 @@ async fn sse_handler_rejects_non_sse_accept_with_jsonrpc_error_shape() {
     );
     assert_eq!(json["id"], Value::Null);
 }
+
+// =====================================================================
+// /metrics endpoint
+// =====================================================================
+
+#[cfg(feature = "metrics")]
+#[tokio::test]
+async fn metrics_endpoint_returns_200() {
+    let router = create_router(test_router_app_state());
+    let request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/metrics")
+        .body(axum::body::Body::empty())
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+
+    // Endpoint must always return 200 (body may be empty when recorder is not
+    // installed in tests, but the route must be reachable).
+    assert_eq!(response.status(), StatusCode::OK);
+}

@@ -143,6 +143,12 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     // Merge JWKS route (unauthenticated)
     app = app.merge(jwks_route);
 
+    // Merge /metrics scrape endpoint (unauthenticated — Prometheus scrapers do not send auth headers)
+    #[cfg(feature = "metrics")]
+    {
+        app = app.merge(Router::new().route("/metrics", get(handlers::metrics_handler)));
+    }
+
     // Merge web UI HTML route (unauthenticated — static HTML, no data)
     #[cfg(feature = "webui")]
     {

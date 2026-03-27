@@ -617,3 +617,22 @@ pub(super) async fn meta_mcp_handler(
     // Return response with session ID header
     build_response(response, &session_id, StatusCode::OK)
 }
+
+/// GET /metrics — Prometheus text exposition format scrape endpoint.
+///
+/// Exposed without authentication so that Prometheus scrapers can reach it
+/// directly.  Returns an empty 200 when the recorder is not installed (e.g.
+/// when running without the `metrics` feature or before server startup).
+#[cfg(feature = "metrics")]
+pub(super) async fn metrics_handler() -> impl IntoResponse {
+    use axum::http::{HeaderValue, header};
+    let body = crate::metrics::render();
+    (
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/plain; version=0.0.4; charset=utf-8"),
+        )],
+        body,
+    )
+}

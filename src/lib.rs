@@ -42,6 +42,8 @@ pub mod gateway;
 pub mod idempotency;
 pub mod key_server;
 pub mod kill_switch;
+#[cfg(feature = "metrics")]
+pub mod metrics;
 pub mod mtls;
 pub mod oauth;
 pub mod playbook;

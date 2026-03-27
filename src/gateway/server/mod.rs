@@ -266,6 +266,10 @@ impl Gateway {
         let (shutdown_tx, _) = tokio::sync::broadcast::channel(1);
         self.shutdown_tx = Some(shutdown_tx.clone());
 
+        // Install Prometheus metrics recorder (no-op when feature is disabled).
+        #[cfg(feature = "metrics")]
+        crate::metrics::install();
+
         // ── Shared MetaMcp initialisation ────────────────────────────────────
         let BuiltMetaMcp {
             meta_mcp,
