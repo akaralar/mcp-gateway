@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
-use crate::config_reload::ReloadContext;
+use crate::config_reload::{ReloadContext, ReloadOutcome};
 
 /// Load config from `path`, returning `Config::default()` when the file is absent
 /// or cannot be parsed.
@@ -62,15 +62,32 @@ pub async fn write_config_and_reload(
     config: &Config,
     reload_context: Option<&ReloadContext>,
 ) -> Result<(), String> {
+    write_config_and_reload_outcome(path, config, reload_context)
+        .await
+        .map(|_| ())
+}
+
+/// Serialize `config`, write it atomically, then return any hot-reload outcome.
+///
+/// # Errors
+///
+/// Returns an error string on serialization, write, rename, or reload failure.
+pub async fn write_config_and_reload_outcome(
+    path: &Path,
+    config: &Config,
+    reload_context: Option<&ReloadContext>,
+) -> Result<Option<ReloadOutcome>, String> {
     write_config(path, config)?;
 
     if let Some(ctx) = reload_context {
-        ctx.reload()
+        let outcome = ctx
+            .reload_outcome()
             .await
             .map_err(|e| format!("Config written but reload failed: {e}"))?;
+        return Ok(Some(outcome));
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn write_yaml(path: &Path, yaml: &str) -> Result<(), String> {
@@ -154,5 +171,18 @@ mod tests {
         assert!(path.exists());
         let loaded = Config::load(Some(&path)).unwrap();
         assert_eq!(loaded.backends.len(), config.backends.len());
+    }
+
+    #[tokio::test]
+    async fn write_config_and_reload_outcome_without_context_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.yaml");
+        let config = Config::default();
+
+        let outcome = write_config_and_reload_outcome(&path, &config, None)
+            .await
+            .unwrap();
+
+        assert!(outcome.is_none());
     }
 }

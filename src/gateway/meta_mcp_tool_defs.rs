@@ -401,7 +401,7 @@ pub(crate) fn build_reload_config_tool() -> Tool {
         title: Some("Reload Config".to_string()),
         description: Some(
             "Trigger an immediate reload of config.yaml from disk without restarting the gateway. \
-             Returns a summary of what changed (backends added/removed/modified, profile updates). \
+             Returns a summary plus explicit restart-required fields when some changes stay pending. \
              Server host/port changes require a restart and are reported but not applied."
                 .to_string(),
         ),

@@ -3,6 +3,8 @@ use std::sync::Arc;
 use serde_json::json;
 
 use crate::backend::BackendRegistry;
+use crate::config::Config;
+use crate::config_reload::{LiveConfig, ReloadContext};
 use crate::protocol::RequestId;
 
 use super::*;
@@ -529,6 +531,61 @@ fn gateway_list_profiles_tool_appears_in_tools_list() {
     assert!(
         names.contains(&"gateway_list_profiles"),
         "Expected gateway_list_profiles in tools list, got: {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn gateway_reload_config_surfaces_restart_required_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("gateway.yaml");
+
+    let old_config = Config::default();
+    let mut new_config = old_config.clone();
+    new_config.server.port += 1;
+    std::fs::write(&config_path, serde_yaml::to_string(&new_config).unwrap()).unwrap();
+
+    let registry = Arc::new(BackendRegistry::new());
+    let live_config = Arc::new(LiveConfig::new(old_config.clone()));
+    let reload_ctx = Arc::new(ReloadContext::new(
+        config_path,
+        Arc::clone(&live_config),
+        Arc::clone(&registry),
+        old_config.failsafe.clone(),
+        old_config.meta_mcp.cache_ttl,
+    ));
+
+    let mm = MetaMcp::new(Arc::clone(&registry));
+    mm.set_reload_context(reload_ctx);
+
+    let resp = mm
+        .handle_tools_call(
+            RequestId::Number(7),
+            "gateway_reload_config",
+            json!({}),
+            None,
+            None,
+        )
+        .await;
+
+    assert!(
+        resp.error.is_none(),
+        "unexpected reload error: {:?}",
+        resp.error
+    );
+    let result = resp.result.unwrap();
+    let text = result["content"][0]["text"]
+        .as_str()
+        .expect("tool result text");
+    let payload: serde_json::Value = serde_json::from_str(text).unwrap();
+
+    assert_eq!(payload["status"], "ok");
+    assert_eq!(payload["restart_required"], true);
+    assert_eq!(payload["restart_reason"], "server_address_changed");
+    assert!(
+        payload["changes"]
+            .as_str()
+            .is_some_and(|changes| changes.contains("restart required")),
+        "expected restart-required summary, got: {payload}"
     );
 }
 

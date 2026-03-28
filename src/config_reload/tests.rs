@@ -263,6 +263,29 @@ fn patch_summary_lists_all_change_types() {
     assert!(s.contains("profiles"), "missing profiles: {s}");
 }
 
+#[test]
+fn patch_outcome_exposes_restart_required_reason() {
+    let patch = ConfigPatch {
+        server_changed: true,
+        ..ConfigPatch::default()
+    };
+
+    let outcome = patch.outcome();
+
+    assert!(outcome.restart_required);
+    assert_eq!(outcome.restart_reason, Some("server_address_changed"));
+    assert!(outcome.changes.contains("restart required"));
+}
+
+#[test]
+fn reload_outcome_no_changes_is_explicit() {
+    let outcome = ReloadOutcome::no_changes();
+
+    assert_eq!(outcome.changes, "no changes detected");
+    assert!(!outcome.restart_required);
+    assert_eq!(outcome.restart_reason, None);
+}
+
 // -------------------------------------------------------------------------
 // LiveConfig
 // -------------------------------------------------------------------------
