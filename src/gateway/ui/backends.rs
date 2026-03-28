@@ -31,7 +31,7 @@ use super::{
     is_admin,
 };
 use crate::config::TransportConfig;
-use crate::config_persistence::write_config_and_reload;
+use crate::config_persistence::write_config_and_reload_outcome;
 use crate::gateway::auth::AuthenticatedClient;
 use crate::gateway::router::AppState;
 use crate::registry::server_registry;
@@ -181,19 +181,20 @@ async fn add_backend(
     }
 
     // Persist and reload
-    if let Err(e) = write_config_and_reload(
+    let reload = match write_config_and_reload_outcome(
         config_path,
         &config,
         state.meta_mcp.reload_context().as_deref(),
     )
     .await
     {
-        return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
+        Ok(reload) => reload,
+        Err(e) => return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
 
     (
         StatusCode::CREATED,
-        Json(json!({"status": "created", "name": req.name})),
+        Json(json!({"status": "created", "name": req.name, "reload": reload})),
     )
         .into_response()
 }
@@ -217,21 +218,18 @@ async fn remove_backend(
 
     let mut config = load_config_or_default(config_path);
     if remove_backend_config(&mut config, &name).is_err() {
-        return flat_error(
-            StatusCode::NOT_FOUND,
-            format!("Backend '{}' not found", name),
-        )
-        .into_response();
+        return flat_error(StatusCode::NOT_FOUND, format!("Backend '{name}' not found"))
+            .into_response();
     }
 
-    if let Err(e) = write_config_and_reload(
+    if let Err(e) = write_config_and_reload_outcome(
         config_path,
         &config,
         state.meta_mcp.reload_context().as_deref(),
     )
     .await
     {
-        return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
     }
 
     (StatusCode::NO_CONTENT, Json(json!({}))).into_response()
@@ -275,11 +273,8 @@ async fn update_backend(
 
     let mut config = load_config_or_default(config_path);
     if !config.backends.contains_key(&name) {
-        return flat_error(
-            StatusCode::NOT_FOUND,
-            format!("Backend '{}' not found", name),
-        )
-        .into_response();
+        return flat_error(StatusCode::NOT_FOUND, format!("Backend '{name}' not found"))
+            .into_response();
     }
 
     let transport = command
@@ -319,24 +314,22 @@ async fn update_backend(
     )
     .is_err()
     {
-        return flat_error(
-            StatusCode::NOT_FOUND,
-            format!("Backend '{}' not found", name),
-        )
-        .into_response();
+        return flat_error(StatusCode::NOT_FOUND, format!("Backend '{name}' not found"))
+            .into_response();
     }
 
-    if let Err(e) = write_config_and_reload(
+    let reload = match write_config_and_reload_outcome(
         config_path,
         &config,
         state.meta_mcp.reload_context().as_deref(),
     )
     .await
     {
-        return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
-    }
+        Ok(reload) => reload,
+        Err(e) => return flat_error(StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
 
-    Json(json!({"status": "updated", "name": name})).into_response()
+    Json(json!({"status": "updated", "name": name, "reload": reload})).into_response()
 }
 
 /// `GET /ui/api/registry` — list all built-in registry entries as JSON.

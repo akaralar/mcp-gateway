@@ -663,8 +663,13 @@ impl MetaMcp {
             Error::json_rpc(-32603, "Config reload is not enabled on this gateway")
         })?;
 
-        match ctx.reload().await {
-            Ok(summary) => Ok(json!({ "status": "ok", "changes": summary })),
+        match ctx.reload_outcome().await {
+            Ok(outcome) => Ok(json!({
+                "status": "ok",
+                "changes": outcome.changes,
+                "restart_required": outcome.restart_required,
+                "restart_reason": outcome.restart_reason,
+            })),
             Err(e) => Err(Error::json_rpc(-32603, e)),
         }
     }

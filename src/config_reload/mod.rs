@@ -45,6 +45,7 @@ use notify::{
     Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
 use parking_lot::{Mutex, RwLock};
+use serde::Serialize;
 use tracing::{info, warn};
 
 use crate::Result;
@@ -72,6 +73,18 @@ pub struct ConfigPatch {
     pub server_changed: bool,
     /// `true` when any field outside of `backends` / `server` changed.
     pub profiles_changed: bool,
+}
+
+/// Structured reload outcome for callers that need more than a log line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReloadOutcome {
+    /// Human-readable summary of what changed.
+    pub changes: String,
+    /// Whether part of the change set remains pending until restart.
+    pub restart_required: bool,
+    /// Stable machine-readable reason for `restart_required`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_reason: Option<&'static str>,
 }
 
 impl ConfigPatch {
@@ -125,6 +138,40 @@ impl ConfigPatch {
             "no changes".to_string()
         } else {
             parts.join("; ")
+        }
+    }
+
+    /// Returns `true` when some detected change requires a process restart.
+    #[must_use]
+    pub fn restart_required(&self) -> bool {
+        self.server_changed
+    }
+
+    /// Stable machine-readable restart reason, if any.
+    #[must_use]
+    pub fn restart_reason(&self) -> Option<&'static str> {
+        self.server_changed.then_some("server_address_changed")
+    }
+
+    /// Structured outcome derived from this patch.
+    #[must_use]
+    pub fn outcome(&self) -> ReloadOutcome {
+        ReloadOutcome {
+            changes: self.summary(),
+            restart_required: self.restart_required(),
+            restart_reason: self.restart_reason(),
+        }
+    }
+}
+
+impl ReloadOutcome {
+    /// Outcome returned when the reload pipeline detects no effective change.
+    #[must_use]
+    pub fn no_changes() -> Self {
+        Self {
+            changes: "no changes detected".to_string(),
+            restart_required: false,
+            restart_reason: None,
         }
     }
 }
@@ -318,7 +365,7 @@ pub async fn apply_patch(
     failsafe_config: &crate::config::FailsafeConfig,
     cache_ttl: Duration,
 ) {
-    if patch.server_changed {
+    if patch.restart_required() {
         warn!("Config reload: server host/port changed — restart required to apply this change");
     }
 
@@ -711,12 +758,21 @@ impl ReloadContext {
     ///
     /// Returns an error string if the config file cannot be read or parsed.
     pub async fn reload(&self) -> std::result::Result<String, String> {
+        self.reload_outcome().await.map(|outcome| outcome.changes)
+    }
+
+    /// Reload the config file and return a structured outcome for callers/UI.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the config file cannot be read or parsed.
+    pub async fn reload_outcome(&self) -> std::result::Result<ReloadOutcome, String> {
         let Some((new_config, patch)) = load_config_patch(&self.config_path, &self.live_config)?
         else {
-            return Ok("no changes detected".to_string());
+            return Ok(ReloadOutcome::no_changes());
         };
 
-        let summary = patch.summary();
+        let outcome = patch.outcome();
         apply_patch(
             &patch,
             &self.registry,
@@ -726,7 +782,7 @@ impl ReloadContext {
         .await;
         self.live_config.set(new_config);
 
-        Ok(summary)
+        Ok(outcome)
     }
 }
 
