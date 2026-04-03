@@ -245,7 +245,7 @@ impl MetaMcp {
             resources: all_resources,
             next_cursor: None,
         };
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     /// Handle `resources/read` — gateway guide resources take priority, then backend routing.
@@ -317,7 +317,7 @@ impl MetaMcp {
             resource_templates: all_templates,
             next_cursor: None,
         };
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     /// Handle `resources/subscribe` — route to the backend that owns the URI.

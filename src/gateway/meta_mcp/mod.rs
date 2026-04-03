@@ -467,7 +467,7 @@ impl MetaMcp {
 
         let instructions = self.build_instructions();
         let result = build_initialize_result(negotiated_version, &instructions);
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     fn build_instructions(&self) -> String {
@@ -559,7 +559,7 @@ impl MetaMcp {
             tools,
             next_cursor: None,
         };
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     /// Dispatch the `tools/list` request with optional params — entry point for the router.

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::warn;
 
 use std::collections::HashMap;
 
@@ -63,6 +64,24 @@ impl JsonRpcResponse {
         }
     }
 
+    /// Create a success response from any serializable payload.
+    ///
+    /// Falls back to a standard internal error response if the payload cannot be
+    /// converted into a JSON value.
+    #[must_use]
+    pub fn success_serialized<T>(id: RequestId, result: T) -> Self
+    where
+        T: Serialize,
+    {
+        match serde_json::to_value(result) {
+            Ok(value) => Self::success(id, value),
+            Err(err) => {
+                warn!(response_id = %id, error = %err, "failed to serialize JSON-RPC success result");
+                Self::internal_error(Some(id))
+            }
+        }
+    }
+
     /// Create an error response
     pub fn error(id: Option<RequestId>, code: i32, message: impl Into<String>) -> Self {
         Self {
@@ -81,6 +100,17 @@ impl JsonRpcResponse {
     #[must_use]
     pub fn internal_error(id: Option<RequestId>) -> Self {
         Self::error(id, -32603, "Internal error")
+    }
+
+    /// Serialize this response into a JSON value, falling back to a standard
+    /// internal error payload if serialization unexpectedly fails.
+    #[must_use]
+    pub fn to_value_lossy(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|err| {
+            warn!(error = %err, "failed to serialize JSON-RPC response");
+            serde_json::to_value(Self::internal_error(None))
+                .expect("internal JSON-RPC fallback must serialize")
+        })
     }
 
     /// Create an error response with data
@@ -804,6 +834,35 @@ mod tests {
         assert_eq!(json["id"], Value::Null);
         assert_eq!(json["error"]["code"], -32603);
         assert_eq!(json["error"]["message"], "Internal error");
+    }
+
+    #[test]
+    fn json_rpc_response_success_serialized_wraps_payload() {
+        let resp = JsonRpcResponse::success_serialized(RequestId::Number(1), json!({"tools": []}));
+        assert!(resp.error.is_none());
+        assert_eq!(resp.id, Some(RequestId::Number(1)));
+        assert_eq!(resp.result, Some(json!({"tools": []})));
+    }
+
+    #[test]
+    fn json_rpc_response_success_serialized_falls_back_to_internal_error() {
+        struct FailingSerialize;
+
+        impl Serialize for FailingSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("boom"))
+            }
+        }
+
+        let resp = JsonRpcResponse::success_serialized(RequestId::Number(7), FailingSerialize);
+        assert!(resp.result.is_none());
+        assert_eq!(resp.id, Some(RequestId::Number(7)));
+        let err = resp.error.expect("internal error payload");
+        assert_eq!(err.code, -32603);
+        assert_eq!(err.message, "Internal error");
     }
 
     #[test]

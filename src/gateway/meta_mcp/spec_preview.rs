@@ -54,7 +54,7 @@ impl MetaMcp {
             tools,
             next_cursor: None,
         };
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     /// Collect all backend tools whose name or description contains `query`.
