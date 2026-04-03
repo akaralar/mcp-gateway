@@ -169,7 +169,7 @@ impl MetaMcp {
             prompts: all_prompts,
             next_cursor: None,
         };
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+        JsonRpcResponse::success_serialized(id, result)
     }
 
     /// Handle `prompts/get` — gateway meta-prompts take priority, then backend routing.
@@ -265,7 +265,10 @@ impl MetaMcp {
         *self.log_level.write() = level_params.level;
         debug!(level = ?level_params.level, "Logging level updated");
 
-        let forward_params = serde_json::to_value(&level_params).unwrap_or(json!({}));
+        let forward_params = serde_json::to_value(&level_params).unwrap_or_else(|err| {
+            warn!(error = %err, "failed to serialize logging/setLevel params for backend forwarding");
+            json!({})
+        });
         for backend in self.backends.all() {
             if let Err(e) = backend
                 .request("logging/setLevel", Some(forward_params.clone()))

@@ -945,7 +945,7 @@ impl Gateway {
 
         let (id, method, params) = match parse_request(request) {
             Ok(parsed) => parsed,
-            Err(response) => return Some(serde_json::to_value(response).unwrap()),
+            Err(response) => return Some(response.to_value_lossy()),
         };
 
         // Notifications have no id — send no response
@@ -957,7 +957,7 @@ impl Gateway {
         // Requests must have an id
         let Some(id) = id else {
             let resp = JsonRpcResponse::error(None, -32600, "Missing id");
-            return Some(serde_json::to_value(resp).unwrap());
+            return Some(resp.to_value_lossy());
         };
 
         let response = match method.as_str() {
@@ -988,7 +988,7 @@ impl Gateway {
                         && let Err(e) = tool_policy.check(server, tool)
                     {
                         let resp = JsonRpcResponse::error(Some(id), -32600, e.to_string());
-                        return Some(serde_json::to_value(resp).unwrap());
+                        return Some(resp.to_value_lossy());
                     }
                 }
 
@@ -1013,7 +1013,7 @@ impl Gateway {
             }
         };
 
-        Some(serde_json::to_value(response).unwrap())
+        Some(response.to_value_lossy())
     }
 
     /// Dispatch a JSON-RPC batch request.
@@ -1026,23 +1026,15 @@ impl Gateway {
     ) -> Vec<serde_json::Value> {
         let Some(requests) = batch.as_array() else {
             return vec![
-                serde_json::to_value(crate::protocol::JsonRpcResponse::error(
-                    None,
-                    -32600,
-                    "Invalid Request",
-                ))
-                .unwrap(),
+                crate::protocol::JsonRpcResponse::error(None, -32600, "Invalid Request")
+                    .to_value_lossy(),
             ];
         };
 
         if requests.is_empty() {
             return vec![
-                serde_json::to_value(crate::protocol::JsonRpcResponse::error(
-                    None,
-                    -32600,
-                    "Invalid Request",
-                ))
-                .unwrap(),
+                crate::protocol::JsonRpcResponse::error(None, -32600, "Invalid Request")
+                    .to_value_lossy(),
             ];
         }
 
