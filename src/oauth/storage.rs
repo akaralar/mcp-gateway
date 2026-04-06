@@ -41,6 +41,10 @@ pub struct TokenInfo {
     /// OAuth `client_id` stored alongside the token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+
+    /// OAuth `client_secret` stored alongside the token (optional; prefer Keychain).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
 }
 
 fn default_token_type() -> String {
@@ -72,6 +76,7 @@ impl TokenInfo {
             scope,
             token_endpoint: None,
             client_id: None,
+            client_secret: None,
         }
     }
 
