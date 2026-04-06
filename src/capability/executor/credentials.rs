@@ -133,7 +133,13 @@ impl CapabilityExecutor {
             // 3. Refresh grant
             if let (Some(ref_tok), Some(endpoint)) = (&token.refresh_token, token_endpoint) {
                 match self
-                    .perform_token_refresh(provider, ref_tok, endpoint, storage)
+                    .perform_token_refresh(
+                        provider,
+                        ref_tok,
+                        endpoint,
+                        storage,
+                        token.client_id.as_deref(),
+                    )
                     .await
                 {
                     Ok(new_token) => return Ok(new_token),
@@ -169,16 +175,32 @@ impl CapabilityExecutor {
     }
 
     /// Perform the OAuth refresh-token grant and persist the refreshed token.
+    ///
+    /// `client_id` is forwarded when present (required by Google and other providers).
+    /// `client_secret` is looked up from the macOS Keychain under the key
+    /// `"{provider}-client-secret"` and included when found.
     async fn perform_token_refresh(
         &self,
         provider: &str,
         refresh_token: &str,
         token_endpoint: &str,
         storage: &crate::oauth::TokenStorage,
+        client_id: Option<&str>,
     ) -> Result<String> {
         let mut params = HashMap::new();
         params.insert("grant_type", "refresh_token");
         params.insert("refresh_token", refresh_token);
+
+        if let Some(id) = client_id {
+            params.insert("client_id", id);
+        }
+
+        let keychain_key = format!("{provider}-client-secret");
+        let client_secret_owned: Option<String> =
+            self.fetch_from_keychain(&keychain_key).await.ok();
+        if let Some(ref secret) = client_secret_owned {
+            params.insert("client_secret", secret.as_str());
+        }
 
         let response = self
             .client
@@ -222,7 +244,8 @@ impl CapabilityExecutor {
             expires_at,
             scope: resp.scope,
             token_endpoint: Some(token_endpoint.to_string()),
-            client_id: None,
+            client_id: client_id.map(str::to_owned),
+            client_secret: client_secret_owned,
         };
 
         if let Err(e) = storage.save(provider, provider, &new_token) {
