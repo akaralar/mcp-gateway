@@ -95,6 +95,7 @@ fn count_capability_yaml_files_by_category() -> Vec<(String, usize)> {
 fn readme_quantitative_claims_match_canonical_benchmark_data() {
     let claims = load_claims();
     let readme = read_repo_file("README.md");
+    let rounded_startup_ms = claims.startup_benchmark.mean_ms.round() as u64;
 
     let direct_tokens = claims.readme_token_savings.direct_tools
         * claims.readme_token_savings.direct_tokens_per_tool;
@@ -145,6 +146,16 @@ fn readme_quantitative_claims_match_canonical_benchmark_data() {
     assert!(
         readme.contains(&format!("**${} saved per 1K**", savings_usd.round() as u64)),
         "README should contain the canonical rounded cost savings claim"
+    );
+    assert!(
+        readme.contains(&format!(
+            "Restart gateway (~{rounded_startup_ms}ms), session stays alive"
+        )),
+        "README should describe config-change restarts with the canonical startup benchmark"
+    );
+    assert!(
+        readme.contains(&format!("| **Startup time** | ~{rounded_startup_ms}ms |")),
+        "README performance table should include the canonical rounded startup metric"
     );
     assert!(
         readme.contains(
