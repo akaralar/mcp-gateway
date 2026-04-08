@@ -4,15 +4,17 @@ use super::helpers::{
     is_notification_method, parse_elicitation_params, parse_request,
 };
 use super::{AppState, create_router};
-use crate::backend::BackendRegistry;
-use crate::config::{AuthConfig, StreamingConfig};
+use crate::backend::{Backend, BackendRegistry};
+use crate::config::{AuthConfig, BackendConfig, FailsafeConfig, StreamingConfig};
 use crate::gateway::test_helpers::MetaMcp;
 use crate::gateway::{
     AgentAuthState, AgentRegistry, GatewayKeyPair, NotificationMultiplexer, ProxyManager,
     ResolvedAuthConfig,
 };
 use crate::mtls::{MtlsConfig, MtlsPolicy};
-use crate::protocol::RequestId;
+use crate::protocol::{JsonRpcResponse, RequestId};
+use crate::transport::Transport;
+use async_trait::async_trait;
 use axum::{
     body::to_bytes,
     http::{HeaderMap, StatusCode},
@@ -20,7 +22,8 @@ use axum::{
 };
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tower::ServiceExt;
 
 fn test_router_app_state_with_streaming(streaming_config: StreamingConfig) -> Arc<AppState> {
@@ -60,6 +63,70 @@ fn test_router_app_state_with_streaming(streaming_config: StreamingConfig) -> Ar
 
 fn test_router_app_state() -> Arc<AppState> {
     test_router_app_state_with_streaming(StreamingConfig::default())
+}
+
+fn test_router_app_state_with_backend(backend: Arc<Backend>) -> Arc<AppState> {
+    let state = test_router_app_state();
+    state.backends.register(backend);
+    state
+}
+
+struct RouterNotificationTestTransport {
+    request_methods: Mutex<Vec<String>>,
+    notify_methods: Mutex<Vec<String>>,
+    notify_error: Option<String>,
+}
+
+impl RouterNotificationTestTransport {
+    fn success() -> Self {
+        Self {
+            request_methods: Mutex::new(Vec::new()),
+            notify_methods: Mutex::new(Vec::new()),
+            notify_error: None,
+        }
+    }
+
+    fn fail(message: &str) -> Self {
+        Self {
+            request_methods: Mutex::new(Vec::new()),
+            notify_methods: Mutex::new(Vec::new()),
+            notify_error: Some(message.to_string()),
+        }
+    }
+}
+
+#[async_trait]
+impl Transport for RouterNotificationTestTransport {
+    async fn request(
+        &self,
+        method: &str,
+        _params: Option<Value>,
+    ) -> crate::Result<JsonRpcResponse> {
+        self.request_methods
+            .lock()
+            .unwrap()
+            .push(method.to_string());
+        Ok(JsonRpcResponse::success_serialized(
+            RequestId::Number(1),
+            json!({"ok": true}),
+        ))
+    }
+
+    async fn notify(&self, method: &str, _params: Option<Value>) -> crate::Result<()> {
+        self.notify_methods.lock().unwrap().push(method.to_string());
+        if let Some(message) = &self.notify_error {
+            return Err(crate::Error::Transport(message.clone()));
+        }
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> crate::Result<()> {
+        Ok(())
+    }
 }
 
 // =====================================================================
@@ -537,6 +604,89 @@ async fn backend_handler_missing_backend_returns_jsonrpc_not_found() {
         "Backend not found: missing-backend"
     );
     assert_eq!(json["id"], Value::Null);
+}
+
+#[tokio::test]
+async fn backend_handler_notification_uses_notify_and_returns_accepted() {
+    let backend = Arc::new(Backend::new(
+        "demo",
+        BackendConfig::default(),
+        &FailsafeConfig::default(),
+        Duration::from_secs(60),
+    ));
+    let transport = Arc::new(RouterNotificationTestTransport::success());
+    let transport_dyn: Arc<dyn Transport> = transport.clone();
+    backend.set_transport_for_test(transport_dyn);
+
+    let router = create_router(test_router_app_state_with_backend(backend));
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/mcp/demo")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": { "progress": 50 }
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json, json!({}));
+    assert!(transport.request_methods.lock().unwrap().is_empty());
+    assert_eq!(
+        transport.notify_methods.lock().unwrap().as_slice(),
+        ["notifications/initialized"]
+    );
+}
+
+#[tokio::test]
+async fn backend_handler_notification_failure_surfaces_error() {
+    let backend = Arc::new(Backend::new(
+        "demo",
+        BackendConfig::default(),
+        &FailsafeConfig::default(),
+        Duration::from_secs(60),
+    ));
+    let transport = Arc::new(RouterNotificationTestTransport::fail("notify failed"));
+    let transport_dyn: Arc<dyn Transport> = transport.clone();
+    backend.set_transport_for_test(transport_dyn);
+
+    let router = create_router(test_router_app_state_with_backend(backend));
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/mcp/demo")
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(
+            json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": { "progress": 50 }
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["jsonrpc"], "2.0");
+    assert_eq!(json["error"]["code"], -32000);
+    assert_eq!(json["error"]["message"], "Transport error: notify failed");
+    assert_eq!(json["id"], Value::Null);
+    assert!(transport.request_methods.lock().unwrap().is_empty());
+    assert_eq!(
+        transport.notify_methods.lock().unwrap().as_slice(),
+        ["notifications/initialized"]
+    );
 }
 
 #[tokio::test]
