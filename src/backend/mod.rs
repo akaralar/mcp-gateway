@@ -547,6 +547,18 @@ impl Backend {
         transport.request(method, params).await
     }
 
+    /// Internal notification send without `ensure_started` (to avoid recursion)
+    async fn notify_internal(&self, method: &str, params: Option<Value>) -> Result<()> {
+        let transport = {
+            let t = self.transport.read();
+            t.clone()
+        };
+
+        let transport = transport.ok_or_else(|| Error::BackendUnavailable(self.name.clone()))?;
+
+        transport.notify(method, params).await
+    }
+
     /// Send a request to the backend
     ///
     /// # Errors
@@ -647,6 +659,89 @@ impl Backend {
         .record(latency.as_secs_f64());
 
         result
+    }
+
+    /// Send a notification to the backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend is unavailable, the concurrency limit
+    /// is reached, or the notification cannot be sent.
+    #[tracing::instrument(
+        skip(self, params),
+        fields(
+            backend = %self.name,
+            method = %method,
+            request_id = %uuid::Uuid::new_v4()
+        )
+    )]
+    pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<()> {
+        let start_time = std::time::Instant::now();
+
+        if !self.failsafe.can_proceed() {
+            telemetry_metrics::gauge!(
+                "mcp_backend_circuit_state",
+                "backend" => self.name.clone()
+            )
+            .set(0.0_f64);
+            tracing::warn!(backend = %self.name, "Notification rejected by circuit breaker");
+            return Err(Error::CircuitOpen(self.name.clone()));
+        }
+        telemetry_metrics::gauge!(
+            "mcp_backend_circuit_state",
+            "backend" => self.name.clone()
+        )
+        .set(1.0_f64);
+
+        let _permit = self.semaphore.acquire().await.map_err(|_| {
+            tracing::warn!("Concurrency limit reached");
+            Error::BackendUnavailable("Concurrency limit reached".to_string())
+        })?;
+
+        self.request_count.fetch_add(1, Ordering::Relaxed);
+
+        self.ensure_started().await?;
+
+        let result = self.notify_internal(method, params).await;
+        let latency = start_time.elapsed();
+
+        match &result {
+            Ok(()) => {
+                tracing::info!(
+                    latency_ms = latency.as_millis(),
+                    "Notification sent successfully"
+                );
+                self.failsafe.record_success(latency);
+                telemetry_metrics::counter!(
+                    "mcp_backend_requests_total",
+                    "backend" => self.name.clone(),
+                    "status" => "ok"
+                )
+                .increment(1);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, latency_ms = latency.as_millis(), "Notification failed");
+                self.failsafe.record_failure();
+                telemetry_metrics::counter!(
+                    "mcp_backend_requests_total",
+                    "backend" => self.name.clone(),
+                    "status" => "error"
+                )
+                .increment(1);
+            }
+        }
+        telemetry_metrics::histogram!(
+            "mcp_backend_request_duration_seconds",
+            "backend" => self.name.clone()
+        )
+        .record(latency.as_secs_f64());
+
+        result
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_transport_for_test(&self, transport: Arc<dyn Transport>) {
+        *self.transport.write() = Some(transport);
     }
 
     /// Return `true` if this backend is configured for pass-through mode.

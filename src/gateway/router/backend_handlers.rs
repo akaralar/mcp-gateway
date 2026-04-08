@@ -140,9 +140,14 @@ pub(super) async fn backend_handler(
 
     // Handle notifications - forward to backend but return 202 Accepted
     if method.starts_with("notifications/") {
-        // Forward notification to backend (fire and forget)
-        let _ = backend.request(&method, params).await;
-        return (StatusCode::ACCEPTED, Json(json!({})));
+        return match backend.notify(&method, params).await {
+            Ok(()) => (StatusCode::ACCEPTED, Json(json!({}))),
+            Err(e) => {
+                error!(backend = %name, error = %e, "Backend notification failed");
+                let response = JsonRpcResponse::error(None, e.to_rpc_code(), e.to_string());
+                build_http_response(&response, StatusCode::INTERNAL_SERVER_ERROR)
+            }
+        };
     }
 
     // For requests, id is guaranteed to exist
