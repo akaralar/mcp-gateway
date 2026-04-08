@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/crates/l/mcp-gateway.svg)](https://github.com/MikkoParkkola/mcp-gateway/blob/main/LICENSE)
 [![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
 [![dependency status](https://deps.rs/repo/github/MikkoParkkola/mcp-gateway/status.svg)](https://deps.rs/repo/github/MikkoParkkola/mcp-gateway)
-[![Capabilities](https://img.shields.io/badge/REST%20capabilities-90%2B-purple.svg)](https://github.com/MikkoParkkola/mcp-gateway/tree/main/capabilities)
+[![Capabilities](https://img.shields.io/badge/REST%20capabilities-100%2B-purple.svg)](https://github.com/MikkoParkkola/mcp-gateway/tree/main/capabilities)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2025--11--25-green.svg)](https://modelcontextprotocol.io)
 [![Glama](https://glama.ai/mcp/servers/MikkoParkkola/mcp-gateway/badge)](https://glama.ai/mcp/servers/MikkoParkkola/mcp-gateway)
 [![Quality Score](https://glama.ai/mcp/servers/MikkoParkkola/mcp-gateway/badges/score.svg)](https://glama.ai/mcp/servers/MikkoParkkola/mcp-gateway)
@@ -161,7 +161,7 @@ Turn any REST API into a tool by dropping a YAML file (~30 seconds) or importing
 mcp-gateway cap import stripe-openapi.yaml --output capabilities/ --prefix stripe
 ```
 
-The gateway ships with **90+ built-in capabilities** -- weather, Wikipedia, GitHub, stock quotes, package tracking, and more. Capability YAMLs hot-reload automatically after file changes, no restart needed.
+The gateway ships with **100+ built-in capabilities** -- weather, Wikipedia, GitHub, stock quotes, package tracking, and more. Capability YAMLs hot-reload automatically after file changes, no restart needed.
 
 ### 3. Change Your MCP Stack Without Losing Your AI Session
 
@@ -216,7 +216,7 @@ Embedded web UI at `/ui` -- live status, searchable tools, server health, config
 
 | Feature | Description |
 |---------|-------------|
-| **Capability System** | REST API to MCP tool via YAML. Hot-reloaded. [90+ built-in](capabilities/). OpenAPI import supported. |
+| **Capability System** | REST API to MCP tool via YAML. Hot-reloaded. [100+ built-in](capabilities/). OpenAPI import supported. |
 | **Transform Chains** | Namespace, filter, rename, and response transforms. [Example](examples/transform-example.yaml). |
 | **Webhooks** | GitHub/Linear/Stripe push events as MCP notifications. [Docs](docs/WEBHOOKS.md). |
 | **Auto-Discovery** | Discover MCP servers from existing client configs and running processes. |
