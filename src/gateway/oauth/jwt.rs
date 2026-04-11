@@ -18,9 +18,27 @@
 //! - RS256 public keys are PEM-encoded and validated at lookup time.
 //! - Tokens with `alg: none` are rejected at the header-decode step.
 //! - Clock leeway of 30 seconds tolerates minor skew.
+//!
+//! # PQC Migration Note (issue #116)
+//!
+//! **HS256 is the recommended algorithm for all new agent registrations.**
+//! HS256 uses HMAC-SHA256 which is PQC-safe: SHA-256 is not broken by any known
+//! quantum algorithm (Grover's algorithm halves the effective key length, but a
+//! 256-bit HMAC key retains 128-bit post-quantum security — well above the 80-bit
+//! minimum).
+//!
+//! RS256 (RSA-2048) is supported for backward compatibility with existing operator
+//! deployments that provide `rs256_public_key` in their agent config.  RSA is
+//! broken by Shor's algorithm on a CRQC (Cryptographically Relevant Quantum
+//! Computer).  Operators should migrate to HS256 before a CRQC becomes available.
+//!
+//! Migration path: remove `rs256_public_key` from the agent config and set
+//! `hs256_secret` to a cryptographically random 32-byte (256-bit) hex string.
+//! Example: `openssl rand -hex 32`
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use super::agents::{AgentDefinition, AgentRegistry};
 use super::scopes::Scope;
@@ -101,7 +119,16 @@ pub fn validate_agent_token(
     // Reject unsupported algorithms up-front.
     let alg = match header.alg {
         Algorithm::HS256 => Algorithm::HS256,
-        Algorithm::RS256 => Algorithm::RS256,
+        Algorithm::RS256 => {
+            // PQC deprecation warning (issue #116): RS256 (RSA-2048) is broken by
+            // Shor's algorithm on a CRQC.  Operators should migrate to HS256.
+            // See module-level documentation for the migration path.
+            warn!(
+                "RS256 agent token accepted — RSA-2048 is not post-quantum safe. \
+                 Migrate this agent to HS256 (see issue #116)."
+            );
+            Algorithm::RS256
+        }
         other => return Err(JwtError::UnsupportedAlgorithm(other)),
     };
 
@@ -255,7 +282,8 @@ mod tests {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
+            .as_secs()
+            .cast_signed();
 
         let claims = serde_json::json!({
             "sub": sub,
@@ -352,7 +380,8 @@ mod tests {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
+            .as_secs()
+            .cast_signed();
 
         let claims = serde_json::json!({
             "sub": "agent-aud",
@@ -388,7 +417,8 @@ mod tests {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() as i64;
+            .as_secs()
+            .cast_signed();
 
         let claims = serde_json::json!({
             "sub": "agent-aud",
@@ -431,6 +461,54 @@ mod tests {
     #[test]
     fn aud_none_fails() {
         assert!(check_audience_claim(None, "target").is_err());
+    }
+
+    // ── RS256 backward-compat (PQC deprecated, issue #116) ───────────────
+
+    #[test]
+    fn rs256_agent_without_public_key_returns_missing_key_error() {
+        // GIVEN: an RS256 token header pointing at an agent that has no rs256_public_key.
+        // This exercises the RS256 branch of build_decoding_key and verifies
+        // MissingKey is returned before any signature check attempt.
+        let reg = AgentRegistry::new();
+        reg.register(AgentDefinition {
+            client_id: "rs256-agent".to_string(),
+            name: "RS256 Agent".to_string(),
+            hs256_secret: None,
+            rs256_public_key: None, // deliberately absent
+            scopes: vec!["tools:*".to_string()],
+            issuer: None,
+            audience: None,
+        });
+
+        // Craft a token with alg=RS256 header by assembling base64url parts.
+        // The signature is irrelevant — MissingKey fires before decode().
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .cast_signed();
+        let header = base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            r#"{"alg":"RS256","typ":"JWT"}"#,
+        );
+        let payload = base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+            format!(
+                r#"{{"sub":"rs256-agent","exp":{},"iat":{}}}"#,
+                now + 3600,
+                now
+            ),
+        );
+        let crafted = format!("{header}.{payload}.fakesig");
+
+        // WHEN: validating
+        let result = validate_agent_token(&crafted, &reg);
+        // THEN: MissingKey — key lookup fires before signature verification
+        assert!(
+            matches!(result, Err(JwtError::MissingKey { .. })),
+            "Expected MissingKey, got: {result:?}"
+        );
     }
 
     // ── extract_sub_unverified ────────────────────────────────────────────
