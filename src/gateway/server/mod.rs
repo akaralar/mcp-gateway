@@ -788,12 +788,17 @@ impl Gateway {
     /// Panics if RSA key pair generation fails on all retry attempts.
     #[allow(clippy::too_many_lines)]
     pub async fn run_stdio(self) -> Result<()> {
-        info!(version = env!("CARGO_PKG_VERSION"), "Starting MCP Gateway (stdio mode)");
+        info!(
+            version = env!("CARGO_PKG_VERSION"),
+            "Starting MCP Gateway (stdio mode)"
+        );
 
         // ── Build the same MetaMcp and supporting components as run() ──────────
         let cache = if self.config.cache.enabled {
             let cache = if self.config.cache.max_entries > 0 {
-                Arc::new(ResponseCache::with_max_entries(self.config.cache.max_entries))
+                Arc::new(ResponseCache::with_max_entries(
+                    self.config.cache.max_entries,
+                ))
             } else {
                 Arc::new(ResponseCache::new())
             };
@@ -881,7 +886,11 @@ impl Gateway {
         // Warm-start backends (same as HTTP mode)
         {
             let warm_start_list = if self.config.meta_mcp.warm_start.is_empty() {
-                self.backends.all().iter().map(|b| b.name.clone()).collect::<Vec<_>>()
+                self.backends
+                    .all()
+                    .iter()
+                    .map(|b| b.name.clone())
+                    .collect::<Vec<_>>()
             } else {
                 self.config.meta_mcp.warm_start.clone()
             };
@@ -908,7 +917,19 @@ impl Gateway {
         // Use a fixed session ID for stdio sessions (single client, long-lived)
         let session_id = "stdio-session";
 
-        while let Ok(Some(line)) = reader.next_line().await {
+        loop {
+            let line = match reader.next_line().await {
+                Ok(Some(line)) => line,
+                Ok(None) => {
+                    info!("stdio: EOF reached, shutting down");
+                    break;
+                }
+                Err(e) => {
+                    warn!(error = %e, "stdio: failed to read stdin");
+                    break;
+                }
+            };
+
             let line = line.trim().to_string();
             if line.is_empty() {
                 continue;
@@ -947,21 +968,14 @@ impl Gateway {
             }
 
             // Single request
-            let response_opt = Self::dispatch_single(
-                &meta_mcp,
-                &tool_policy,
-                &mtls_policy,
-                &request,
-                session_id,
-            )
-            .await;
+            let response_opt =
+                Self::dispatch_single(&meta_mcp, &tool_policy, &mtls_policy, &request, session_id)
+                    .await;
 
             if let Some(response) = response_opt {
                 Self::write_response(&mut stdout, &response).await;
             }
         }
-
-        info!("stdio: EOF reached, shutting down");
         self.backends.stop_all().await;
         Ok(())
     }
@@ -1077,11 +1091,11 @@ impl Gateway {
             "resources/list" => meta_mcp.handle_resources_list(id, params.as_ref()).await,
             "resources/read" => meta_mcp.handle_resources_read(id, params.as_ref()).await,
             "resources/templates/list" => {
-                meta_mcp.handle_resources_templates_list(id, params.as_ref()).await
+                meta_mcp
+                    .handle_resources_templates_list(id, params.as_ref())
+                    .await
             }
-            "logging/setLevel" => {
-                meta_mcp.handle_logging_set_level(id, params.as_ref()).await
-            }
+            "logging/setLevel" => meta_mcp.handle_logging_set_level(id, params.as_ref()).await,
             "ping" => JsonRpcResponse::success(id, serde_json::json!({})),
             other => {
                 debug!(method = %other, "stdio: unknown method");
@@ -1103,6 +1117,14 @@ impl Gateway {
         let Some(requests) = batch.as_array() else {
             return vec![];
         };
+        if requests.is_empty() {
+            let resp = crate::protocol::JsonRpcResponse::error(
+                None,
+                -32600,
+                "Empty batch array is invalid",
+            );
+            return vec![serde_json::to_value(resp).unwrap()];
+        }
 
         let mut responses = Vec::new();
         for req in requests {
@@ -1113,5 +1135,37 @@ impl Gateway {
             }
         }
         responses
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn stdio_dispatch_parts() -> (Arc<MetaMcp>, Arc<ToolPolicy>, Arc<MtlsPolicy>) {
+        let config = Config::default();
+        let backends = Arc::new(BackendRegistry::new());
+        let meta_mcp = Arc::new(MetaMcp::new(backends));
+        let tool_policy = Arc::new(ToolPolicy::from_config(&config.security.tool_policy));
+        let mtls_policy = Arc::new(MtlsPolicy::from_config(&config.mtls));
+        (meta_mcp, tool_policy, mtls_policy)
+    }
+
+    #[tokio::test]
+    async fn dispatch_batch_rejects_empty_arrays() {
+        let (meta_mcp, tool_policy, mtls_policy) = stdio_dispatch_parts();
+
+        let responses =
+            Gateway::dispatch_batch(&meta_mcp, &tool_policy, &mtls_policy, json!([]), "stdio")
+                .await;
+
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["jsonrpc"], "2.0");
+        assert_eq!(responses[0]["error"]["code"], -32600);
+        assert_eq!(
+            responses[0]["error"]["message"],
+            "Empty batch array is invalid"
+        );
     }
 }

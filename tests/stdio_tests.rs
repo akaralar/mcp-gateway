@@ -62,11 +62,11 @@ fn test_extract_request_id_numeric() {
 #[tokio::test]
 async fn test_stdio_initialize_produces_valid_response() {
     use mcp_gateway::backend::BackendRegistry;
+    use mcp_gateway::gateway::streaming::NotificationMultiplexer;
     use mcp_gateway::gateway::test_helpers::{AppState, MetaMcp};
     use mcp_gateway::gateway::{
         AgentAuthState, AgentRegistry, GatewayKeyPair, ProxyManager, ResolvedAuthConfig,
     };
-    use mcp_gateway::gateway::streaming::NotificationMultiplexer;
     use mcp_gateway::mtls::MtlsPolicy;
     use mcp_gateway::security::ToolPolicy;
     use std::sync::Arc;
@@ -156,12 +156,18 @@ async fn test_stdio_tools_list_returns_meta_tools() {
     let response = meta_mcp.handle_tools_list_with_params(id, None, Some("stdio-test"));
 
     let serialized = serde_json::to_value(&response).expect("serialize");
-    assert!(serialized.get("result").is_some(), "tools/list should return a result");
+    assert!(
+        serialized.get("result").is_some(),
+        "tools/list should return a result"
+    );
     assert!(serialized.get("error").is_none());
 
     // The result should contain a tools array
     let tools = &serialized["result"]["tools"];
-    assert!(tools.is_array(), "tools/list result.tools should be an array");
+    assert!(
+        tools.is_array(),
+        "tools/list result.tools should be an array"
+    );
     // Meta-tools should be present (gateway_search_tools, gateway_invoke, etc.)
     let tool_names: Vec<&str> = tools
         .as_array()
