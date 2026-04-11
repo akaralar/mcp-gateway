@@ -298,6 +298,17 @@ Any MCP-compliant server works. All three transport types supported:
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full details. Look for [`good first issue`](https://github.com/MikkoParkkola/mcp-gateway/labels/good%20first%20issue) or [`help wanted`](https://github.com/MikkoParkkola/mcp-gateway/labels/help%20wanted) to get started.
 
+## More Tools
+
+| Tool | What it does |
+|------|-------------|
+| [trvl](https://github.com/MikkoParkkola/trvl) | AI travel agent — flights, hotels, ferries, 33 MCP tools |
+| [axterminator](https://github.com/MikkoParkkola/axterminator) | macOS GUI automation — 30 MCP tools, audio/camera capture |
+| [nab](https://github.com/MikkoParkkola/nab) | Token-optimized HTTP client for LLMs |
+| [nowifi](https://github.com/MikkoParkkola/nowifi) | One-command captive portal bypass |
+
+All tools: `brew tap MikkoParkkola/tap && brew install trvl axterminator mcp-gateway nab nowifi`
+
 ## License
 
 MIT License -- see [LICENSE](LICENSE) for details.
