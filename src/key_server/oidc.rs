@@ -18,6 +18,18 @@
 //!   the gateway host.
 //! - `iat` is checked: tokens issued more than `max_token_age` ago are rejected
 //!   to prevent OIDC token replay (default 5 minutes).
+//!
+//! # PQC Migration Note (issue #116)
+//!
+//! RS256 / RS384 / RS512 algorithms are accepted here because external OIDC
+//! providers (Google, GitHub, Azure AD) issue RSA-signed ID tokens and we cannot
+//! control their signing algorithm.  RSA is broken by Shor's algorithm on a CRQC.
+//!
+//! This module will migrate to ECDSA (ES256/ES384) and EDDSA (Ed25519) when those
+//! algorithms are widely supported by `IdP` JWKS endpoints.  ES256 is already
+//! supported in this codebase — operators running their own `IdP` (Keycloak, Dex,
+//! Authentik) should configure it to issue ES256 tokens as the PQC-transition
+//! interim step.  ES256 is not broken by Grover's algorithm at 256-bit key sizes.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
