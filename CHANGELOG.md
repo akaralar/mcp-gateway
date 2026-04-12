@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Kani firewall action proof** — formally verify firewall action resolution so clean requests stay allowed, first-match rule overrides remain explicit, and default severity mapping still blocks/warns/allows as intended.
+
 ## [2.9.1] - 2026-03-24
 
 ### Changed

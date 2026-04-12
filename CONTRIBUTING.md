@@ -29,7 +29,9 @@ python3 benchmarks/token_savings.py --scenario readme --json
 
 ### Formal Verification (Kani)
 
-`mcp-gateway` also has targeted Kani proofs for small state-machine logic.
+`mcp-gateway` also has targeted Kani proofs for small safety-critical helpers:
+circuit-breaker transitions, idempotency decisions, kill-switch budget decisions,
+and firewall action resolution.
 
 ```bash
 cargo install --locked kani-verifier

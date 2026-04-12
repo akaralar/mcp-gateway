@@ -380,29 +380,11 @@ impl Firewall {
     /// First matching rule wins. When no rule matches, the highest-severity
     /// finding determines the action: High→Block, Medium→Warn, Low→Allow.
     fn resolve_action(&self, tool: &str, findings: &[Finding]) -> FirewallAction {
-        if findings.is_empty() {
-            return FirewallAction::Allow;
-        }
+        let highest_severity = strongest_finding_severity(findings);
+        let matching_rule_action =
+            highest_severity.and_then(|_| first_matching_rule_action(&self.rules, tool));
 
-        // First matching rule overrides severity-based default.
-        for rule in &self.rules {
-            if rule_matches(rule, tool) {
-                return rule.action;
-            }
-        }
-
-        // Default: highest-severity finding drives the action.
-        let max_severity = findings.iter().map(|f| f.severity).min_by_key(|s| match s {
-            Severity::High => 0,
-            Severity::Medium => 1,
-            Severity::Low => 2,
-        });
-
-        match max_severity {
-            Some(Severity::High) => FirewallAction::Block,
-            Some(Severity::Medium) => FirewallAction::Warn,
-            _ => FirewallAction::Allow,
-        }
+        decide_firewall_action(matching_rule_action, highest_severity)
     }
 
     /// Clean up per-session state in the anomaly detector.
@@ -443,6 +425,100 @@ fn compile_rule(rule: &FirewallRule) -> CompiledRule {
 
 fn rule_matches(rule: &CompiledRule, tool: &str) -> bool {
     rule.pattern.matches(tool)
+}
+
+fn first_matching_rule_action(rules: &[CompiledRule], tool: &str) -> Option<FirewallAction> {
+    rules
+        .iter()
+        .find(|rule| rule_matches(rule, tool))
+        .map(|rule| rule.action)
+}
+
+fn strongest_finding_severity(findings: &[Finding]) -> Option<Severity> {
+    findings
+        .iter()
+        .map(|finding| finding.severity)
+        .min_by_key(|severity| severity_rank(*severity))
+}
+
+const fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::High => 0,
+        Severity::Medium => 1,
+        Severity::Low => 2,
+    }
+}
+
+const fn default_action_for_severity(severity: Severity) -> FirewallAction {
+    match severity {
+        Severity::High => FirewallAction::Block,
+        Severity::Medium => FirewallAction::Warn,
+        Severity::Low => FirewallAction::Allow,
+    }
+}
+
+const fn decide_firewall_action(
+    matching_rule_action: Option<FirewallAction>,
+    highest_severity: Option<Severity>,
+) -> FirewallAction {
+    match highest_severity {
+        None => FirewallAction::Allow,
+        Some(severity) => match matching_rule_action {
+            Some(action) => action,
+            None => default_action_for_severity(severity),
+        },
+    }
+}
+
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    fn any_firewall_action() -> FirewallAction {
+        match kani::any::<u8>() % 3 {
+            0 => FirewallAction::Allow,
+            1 => FirewallAction::Warn,
+            _ => FirewallAction::Block,
+        }
+    }
+
+    fn any_severity() -> Severity {
+        match kani::any::<u8>() % 3 {
+            0 => Severity::High,
+            1 => Severity::Medium,
+            _ => Severity::Low,
+        }
+    }
+
+    #[kani::proof]
+    fn firewall_action_resolution_contract() {
+        let has_findings: bool = kani::any();
+        let has_matching_rule: bool = kani::any();
+
+        let highest_severity = if has_findings {
+            Some(any_severity())
+        } else {
+            None
+        };
+        let matching_rule_action = if has_matching_rule {
+            Some(any_firewall_action())
+        } else {
+            None
+        };
+
+        let action = decide_firewall_action(matching_rule_action, highest_severity);
+
+        match highest_severity {
+            None => assert_eq!(action, FirewallAction::Allow),
+            Some(severity) => {
+                if let Some(rule_action) = matching_rule_action {
+                    assert_eq!(action, rule_action);
+                } else {
+                    assert_eq!(action, default_action_for_severity(severity));
+                }
+            }
+        }
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -601,6 +677,50 @@ mod tests {
         // Shell injection would normally block, but * rule overrides to Allow
         let args = json!({ "cmd": "; rm -rf / " });
         let verdict = fw.check_request("s1", "srv", "any_tool", &args, "caller");
+        assert!(verdict.allowed);
+        assert_eq!(verdict.action, FirewallAction::Allow);
+    }
+
+    #[test]
+    fn first_matching_rule_wins() {
+        let cfg = FirewallConfig {
+            rules: vec![
+                FirewallRule {
+                    tool_match: "*".to_string(),
+                    action: FirewallAction::Warn,
+                    reason: Some("Catch-all warning".to_string()),
+                    scan: vec![],
+                },
+                FirewallRule {
+                    tool_match: "exec_*".to_string(),
+                    action: FirewallAction::Block,
+                    reason: Some("Specific block".to_string()),
+                    scan: vec![],
+                },
+            ],
+            ..FirewallConfig::default()
+        };
+        let fw = Firewall::from_config(cfg, None);
+        let args = json!({ "cmd": "; rm -rf / " });
+        let verdict = fw.check_request("s1", "srv", "exec_command", &args, "caller");
+        assert!(verdict.allowed);
+        assert_eq!(verdict.action, FirewallAction::Warn);
+    }
+
+    #[test]
+    fn clean_args_ignore_matching_rules() {
+        let cfg = FirewallConfig {
+            rules: vec![FirewallRule {
+                tool_match: "*".to_string(),
+                action: FirewallAction::Block,
+                reason: Some("Only applies when a finding exists".to_string()),
+                scan: vec![],
+            }],
+            ..FirewallConfig::default()
+        };
+        let fw = Firewall::from_config(cfg, None);
+        let args = json!({ "name": "hello", "count": 42 });
+        let verdict = fw.check_request("s1", "srv", "tool", &args, "caller");
         assert!(verdict.allowed);
         assert_eq!(verdict.action, FirewallAction::Allow);
     }
