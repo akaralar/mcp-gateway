@@ -120,7 +120,7 @@ capabilities:
 # Server settings
 server:
   host: "127.0.0.1"
-  port: 3000
+  port: 39400
 
 # Meta-MCP mode - exposes a compact gateway tool surface
 # Common deployment: 14 tools (12 minimum, 15 with webhooks)
@@ -144,7 +144,7 @@ fn print_init_success(output: &std::path::Path) {
     println!("     {{");
     println!("       \"mcpServers\": {{");
     println!("         \"gateway\": {{");
-    println!("           \"url\": \"http://127.0.0.1:3000/mcp\"");
+    println!("           \"url\": \"http://127.0.0.1:39400/mcp\"");
     println!("         }}");
     println!("       }}");
     println!("     }}");

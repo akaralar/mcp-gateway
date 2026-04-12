@@ -79,42 +79,70 @@ Full walkthrough, PoC snippets, and roadmap: [docs/blog/security-aware-mcp-gatew
 
 ## Quick Start
 
+**60 seconds, zero hand-written YAML, zero API keys to start.** The wizard scans your existing AI clients (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, Continue.dev, Codex) plus running MCP processes, imports every server it finds into one `gateway.yaml`, and writes the gateway entry back into each client so they all route through one place.
+
+```bash
+brew install MikkoParkkola/tap/mcp-gateway   # 1. install
+mcp-gateway setup wizard --configure-client  # 2. import existing servers + wire up clients
+mcp-gateway serve                            # 3. run
+mcp-gateway doctor                           # 4. verify everything is healthy
+```
+
+That's it. Your AI clients now talk to the gateway and the gateway routes to every backend you already had configured — at a flat `~14 tools` instead of `~150`. Start with `gateway_search_tools` from your AI client to find any backend tool, then invoke it with `gateway_invoke`.
+
+> **Nothing to import yet?** `mcp-gateway init --with-examples` writes a working `gateway.yaml` with public capabilities so you can confirm the gateway is alive before adding your own servers.
+
 ### Install
 
-**Homebrew (macOS/Linux):**
-```bash
-brew tap MikkoParkkola/tap && brew install mcp-gateway
-```
+| Method | Command |
+|--------|---------|
+| **Homebrew (macOS/Linux, recommended)** | `brew install MikkoParkkola/tap/mcp-gateway` |
+| **Cargo** | `cargo install mcp-gateway` |
+| **cargo-binstall** | `cargo binstall mcp-gateway` |
+| **Docker** | `docker run -v $(pwd)/gateway.yaml:/config.yaml ghcr.io/mikkoparkkola/mcp-gateway:latest --config /config.yaml` |
 
-**Cargo:**
-```bash
-cargo install mcp-gateway
-```
+<details>
+<summary>Direct binary download</summary>
 
-**Binary download:**
 ```bash
-# macOS ARM64 (M1/M2/M3/M4)
-curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-darwin-arm64 -o mcp-gateway
+# macOS Apple Silicon
+curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-darwin-arm64 -o mcp-gateway && chmod +x mcp-gateway
 
 # macOS Intel
-curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-darwin-x86_64 -o mcp-gateway
+curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-darwin-x86_64 -o mcp-gateway && chmod +x mcp-gateway
 
 # Linux x86_64
-curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-linux-x86_64 -o mcp-gateway
-
-chmod +x mcp-gateway
+curl -L https://github.com/MikkoParkkola/mcp-gateway/releases/latest/download/mcp-gateway-linux-x86_64 -o mcp-gateway && chmod +x mcp-gateway
 ```
 
-**Docker:**
+</details>
+
+### Set up — three ways
+
+#### Option A — Auto-import everything (recommended)
+
 ```bash
-docker run -v $(pwd)/gateway.yaml:/config.yaml \
-  ghcr.io/mikkoparkkola/mcp-gateway:latest \
-  --config /config.yaml
+mcp-gateway setup wizard --configure-client
 ```
 
-### Configure
+Scans Claude Desktop, Claude Code, Cursor, Zed, Continue.dev, Codex, and running MCP processes; lets you pick which servers to import into `gateway.yaml`; and writes the gateway entry back into each detected client config so they route through the gateway instead. Add `--yes` to skip the prompts and import everything.
 
-Create `gateway.yaml`:
+#### Option B — Add servers from the built-in registry
+
+48 popular MCP servers are pre-registered with the right command, args, and env-var template. `mcp-gateway add` is `claude mcp add` / `codex mcp add` compatible:
+
+```bash
+mcp-gateway add tavily                                       # known server, fills env vars
+mcp-gateway add my-server -- npx -y @some/mcp-server --flag  # arbitrary stdio command
+mcp-gateway add --url https://mcp.sentry.dev/mcp sentry      # HTTP server
+mcp-gateway add -e API_KEY=xxx my-server -- npx my-mcp-server
+```
+
+`mcp-gateway list` shows what's configured. `mcp-gateway remove <name>` removes one.
+
+#### Option C — Hand-write `gateway.yaml`
+
+For the full schema reference, see [docs/QUICKSTART.md#configuration](docs/QUICKSTART.md#configuration). Minimal example:
 
 ```yaml
 server:
@@ -123,14 +151,6 @@ server:
 meta_mcp:
   enabled: true
 
-failsafe:
-  circuit_breaker:
-    enabled: true
-    failure_threshold: 5
-  retry:
-    enabled: true
-    max_attempts: 3
-
 backends:
   tavily:
     command: "npx -y @anthropic/mcp-server-tavily"
@@ -138,20 +158,46 @@ backends:
     env:
       TAVILY_API_KEY: "${TAVILY_API_KEY}"
 
-  context7:
-    http_url: "http://localhost:8080/mcp"
-    description: "Documentation lookup"
+  sentry:
+    http_url: "https://mcp.sentry.dev/mcp"
+    description: "Sentry issues"
 ```
 
-### Run
+### Run and verify
 
 ```bash
-mcp-gateway --config gateway.yaml
+mcp-gateway serve                  # start the gateway
+mcp-gateway doctor                 # diagnose config, port, env vars, backend health
+mcp-gateway doctor --fix           # auto-fix issues where possible
 ```
 
-### Connect your AI client
+The web dashboard is at <http://localhost:39400/ui> once `serve` is running.
 
-Point your MCP client (Claude Code, Cursor, Windsurf, etc.) at the gateway:
+### Connect AI clients (if you skipped Option A)
+
+`setup export` writes the gateway entry into client config files for you. It auto-detects the right path per client:
+
+```bash
+mcp-gateway setup export --target all                 # all detected clients
+mcp-gateway setup export --target claude-code         # one client
+mcp-gateway setup export --target all --dry-run       # preview without writing
+mcp-gateway setup export --target all --watch         # regenerate on gateway.yaml changes
+```
+
+| Client | Config path |
+|--------|-------------|
+| `claude-code` | `~/.claude.json` |
+| `claude-desktop` | platform-specific |
+| `cursor` | `.cursor/mcp.json` (workspace) |
+| `vs-code-copilot` | `.vscode/mcp.json` (workspace) |
+| `windsurf` | `~/.codeium/windsurf/mcp_config.json` |
+| `cline` | `.cline/mcp_servers.json` (workspace) |
+| `zed` | `~/.config/zed/settings.json` |
+
+Modes: `--mode proxy` (HTTP), `--mode stdio` (subprocess), `--mode auto` (probe health endpoint, fall back).
+
+<details>
+<summary>Manual JSON snippet (if you prefer to edit by hand)</summary>
 
 ```json
 {
@@ -164,7 +210,7 @@ Point your MCP client (Claude Code, Cursor, Windsurf, etc.) at the gateway:
 }
 ```
 
-That's it. Your AI now has access to all backends through the gateway's Meta-MCP surface. Start with `gateway_search_tools` to find the right tool, then invoke it with `gateway_invoke`.
+</details>
 
 ## Key Benefits
 

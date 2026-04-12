@@ -496,7 +496,7 @@ mod tests {
         let content = std::fs::read_to_string(&output).unwrap();
         assert!(content.contains("server:"));
         assert!(content.contains("host: \"127.0.0.1\""));
-        assert!(content.contains("port: 3000"));
+        assert!(content.contains("port: 39400"));
         assert!(content.contains("meta_mcp:"));
         assert!(content.contains("enabled: true"));
     }
