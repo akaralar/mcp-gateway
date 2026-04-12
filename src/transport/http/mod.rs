@@ -203,7 +203,7 @@ impl HttpTransport {
             })),
         };
 
-        let response = self.send_request(&request).await?;
+        let response = self.send_request_inner(&request).await?;
 
         // Check for protocol version mismatch error
         if let Some(ref error) = response.error {
@@ -238,7 +238,7 @@ impl HttpTransport {
                         })),
                     };
 
-                    let retry_response = self.send_request(&retry_request).await?;
+                    let retry_response = self.send_request_inner(&retry_request).await?;
 
                     if retry_response.error.is_some() {
                         return Err(Error::Protocol(format!(
@@ -492,8 +492,25 @@ impl HttpTransport {
             .unwrap_or_else(|| self.base_url.clone())
     }
 
-    /// Send a raw request to the message endpoint
+    /// Send a raw request to the message endpoint, retrying once on stale session.
     async fn send_request(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
+        match self.send_request_inner(request).await {
+            Err(Error::Transport(ref msg))
+                if msg.contains("missing valid MCP session")
+                    && request.method != "initialize" =>
+            {
+                warn!(url = %self.base_url, "Session expired, re-initializing connection");
+                *self.session_id.write() = None;
+                self.connected.store(false, Ordering::Relaxed);
+                self.initialize().await?;
+                self.send_request_inner(request).await
+            }
+            other => other,
+        }
+    }
+
+    /// Core request logic without retry.
+    async fn send_request_inner(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
         let message_url = self.get_message_url();
 
         let headers = self
