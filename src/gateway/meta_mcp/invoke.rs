@@ -20,9 +20,9 @@ use crate::security::validate_tool_name;
 use crate::{Error, Result};
 
 use super::super::meta_mcp_helpers::{
-    build_circuit_breaker_stats_json, build_server_safety_status, build_stats_response,
-    did_you_mean, extract_bool_or, extract_optional_str, extract_price_per_million,
-    extract_required_str, parse_tool_arguments,
+    build_circuit_breaker_stats_json, build_server_safety_status,
+    build_server_tool_not_found_message, build_stats_response, did_you_mean, extract_bool_or,
+    extract_optional_str, extract_price_per_million, extract_required_str, parse_tool_arguments,
 };
 use super::super::trace;
 use super::MetaMcp;
@@ -494,13 +494,12 @@ impl MetaMcp {
             // the error with Levenshtein-based suggestions.
             let message = if !cached_names.is_empty() && !tool_is_cached {
                 let candidates: Vec<&str> = cached_names.iter().map(String::as_str).collect();
-                match did_you_mean(tool, &candidates, 3, 3) {
-                    Some(hint) => format!("Tool '{tool}' not found on server '{server}'. {hint}"),
-                    None => format!(
-                        "Tool '{tool}' not found on server '{server}'. {}",
-                        error.message
-                    ),
-                }
+                build_server_tool_not_found_message(
+                    tool,
+                    server,
+                    Some(&error.message),
+                    did_you_mean(tool, &candidates, 3, 3),
+                )
             } else {
                 error.message
             };

@@ -895,6 +895,45 @@ async fn tools_call_unknown_non_surfaced_tool_returns_32601() {
     // THEN: -32601 "Unknown tool" error
     let err = resp.error.expect("Expected an RPC error for unknown tool");
     assert_eq!(err.code, -32601);
+    assert!(
+        err.message.contains("<recovery>"),
+        "message: {}",
+        err.message
+    );
+    assert!(
+        err.message
+            .contains("Use tools/list to inspect the available meta-MCP tool surface."),
+        "message: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn tools_call_typoed_meta_tool_includes_recovery_suggestion() {
+    let mm = MetaMcp::new(Arc::new(BackendRegistry::new()));
+
+    let resp = mm
+        .handle_tools_call(
+            RequestId::Number(2),
+            "gateway_invokee",
+            json!({}),
+            None,
+            None,
+        )
+        .await;
+
+    let err = resp.error.expect("Expected an RPC error for unknown tool");
+    assert_eq!(err.code, -32601);
+    assert!(
+        err.message.contains("<recovery>"),
+        "message: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("Did you mean: gateway_invoke?"),
+        "message: {}",
+        err.message
+    );
 }
 
 #[tokio::test]

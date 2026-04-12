@@ -44,8 +44,8 @@ use crate::{Error, Result};
 
 use super::meta_mcp_helpers::{
     build_code_mode_tools, build_discovery_preamble, build_initialize_result, build_meta_tools,
-    build_routing_instructions, did_you_mean, extract_client_version, extract_required_str,
-    wrap_tool_success,
+    build_routing_instructions, build_unknown_meta_tool_message, did_you_mean,
+    extract_client_version, extract_required_str, wrap_tool_success,
 };
 use super::webhooks::WebhookRegistry;
 
@@ -656,10 +656,7 @@ impl MetaMcp {
                     "gateway_reload_config",
                 ];
                 let suggestion = did_you_mean(tool_name, META_TOOLS, 3, 3);
-                let msg = match suggestion {
-                    Some(hint) => format!("Unknown tool: {tool_name}. {hint}"),
-                    None => format!("Unknown tool: {tool_name}"),
-                };
+                let msg = build_unknown_meta_tool_message(tool_name, suggestion);
                 Err(Error::json_rpc(-32601, msg))
             }
         };

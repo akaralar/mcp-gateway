@@ -351,6 +351,44 @@ fn did_you_mean_sorts_by_ascending_distance() {
     assert_eq!(first, "gateway_invoke");
 }
 
+#[test]
+fn unknown_meta_tool_message_includes_recovery_block() {
+    let message = build_unknown_meta_tool_message(
+        "gateway_invokee",
+        Some("Did you mean: gateway_invoke?".to_string()),
+    );
+
+    assert!(message.contains("Unknown tool: gateway_invokee"));
+    assert!(message.contains("<recovery>"), "message: {message}");
+    assert!(message.contains("Did you mean: gateway_invoke?"));
+    assert!(message.contains("Use tools/list to inspect the available meta-MCP tool surface."));
+}
+
+#[test]
+fn resolve_tool_not_found_message_escapes_query_hint() {
+    let message = build_resolve_tool_not_found_message("tool\"name", None);
+
+    assert!(message.contains("Tool 'tool\"name' not found in any backend cache."));
+    assert!(message.contains("<recovery>"), "message: {message}");
+    assert!(message.contains("gateway_search_tools(query=&quot;tool&quot;name&quot;)"));
+}
+
+#[test]
+fn server_tool_not_found_message_includes_server_specific_recovery_hints() {
+    let message = build_server_tool_not_found_message(
+        "missing_tool",
+        "demo",
+        Some("backend says no such tool"),
+        Some("Did you mean: existing_tool?".to_string()),
+    );
+
+    assert!(message.contains("Tool 'missing_tool' not found on server 'demo'."));
+    assert!(message.contains("<recovery>"), "message: {message}");
+    assert!(message.contains("Did you mean: existing_tool?"));
+    assert!(message.contains("gateway_list_tools(server=&quot;demo&quot;)"));
+    assert!(message.contains("gateway_search_tools(query=&quot;missing_tool&quot;)"));
+}
+
 // ── build_routing_instructions ──────────────────────────────────────
 
 fn make_capability_def(

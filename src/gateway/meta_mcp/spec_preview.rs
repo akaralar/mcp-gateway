@@ -10,7 +10,7 @@ use tracing::debug;
 use crate::autotag;
 use crate::protocol::{JsonRpcResponse, RequestId, Tool, ToolsListResult};
 
-use super::super::meta_mcp_helpers::did_you_mean;
+use super::super::meta_mcp_helpers::{build_resolve_tool_not_found_message, did_you_mean};
 use super::MAX_PROMOTED_PER_SESSION;
 use super::MetaMcp;
 
@@ -176,10 +176,7 @@ impl MetaMcp {
         let all_names: Vec<String> = self.collect_all_cached_tool_names();
         let candidates: Vec<&str> = all_names.iter().map(String::as_str).collect();
 
-        match did_you_mean(name, &candidates, 3, 3) {
-            Some(hint) => format!("Tool '{name}' not found. {hint}"),
-            None => format!("Tool '{name}' not found in any backend cache"),
-        }
+        build_resolve_tool_not_found_message(name, did_you_mean(name, &candidates, 3, 3))
     }
 
     /// Collect tool names from every cached backend (for suggestions).
@@ -424,6 +421,17 @@ mod tests {
         assert!(
             err.message.contains("not found"),
             "Expected 'not found' in: {}",
+            err.message
+        );
+        assert!(
+            err.message.contains("<recovery>"),
+            "message: {}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains("gateway_search_tools(query=&quot;nonexistent_tool_xyz&quot;)"),
+            "message: {}",
             err.message
         );
     }

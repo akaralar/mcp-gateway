@@ -3,6 +3,8 @@
 //! These are stateless functions with no async or backend dependencies.
 //! Tool schema definitions live in [`super::meta_mcp_tool_defs`].
 
+use std::fmt::Write as _;
+
 use serde_json::{Value, json};
 
 use crate::failsafe::CircuitBreakerStats;
@@ -89,6 +91,103 @@ pub(crate) fn did_you_mean(
 
     let names: Vec<&str> = suggestions.iter().map(|(n, _)| *n).collect();
     Some(format!("Did you mean: {}?", names.join(", ")))
+}
+
+/// Build a parseable recovery block for an error message.
+fn append_recovery_block(mut message: String, action: &str, hints: &[String]) -> String {
+    message.push_str("\n\n<recovery>\n");
+    let _ = writeln!(
+        message,
+        "  <action>{}</action>",
+        escape_recovery_xml(action)
+    );
+    for hint in hints {
+        let _ = writeln!(message, "  <hint>{}</hint>", escape_recovery_xml(hint));
+    }
+    message.push_str("</recovery>");
+    message
+}
+
+/// Escape plain text for inclusion inside the XML-like recovery block.
+fn escape_recovery_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Build the recovery message for an unknown Meta-MCP tool name.
+pub(crate) fn build_unknown_meta_tool_message(
+    tool_name: &str,
+    suggestion: Option<String>,
+) -> String {
+    let mut hints = Vec::new();
+    if let Some(suggestion) = suggestion {
+        hints.push(suggestion);
+    }
+    hints.push("Use tools/list to inspect the available meta-MCP tool surface.".to_string());
+
+    append_recovery_block(
+        format!("Unknown tool: {tool_name}"),
+        "Choose an available tool name and retry the same tool call.",
+        &hints,
+    )
+}
+
+/// Build the recovery message for a tool name that is missing from cached tools.
+pub(crate) fn build_resolve_tool_not_found_message(
+    tool_name: &str,
+    suggestion: Option<String>,
+) -> String {
+    let mut hints = Vec::new();
+    if let Some(suggestion) = suggestion {
+        hints.push(suggestion);
+    }
+    hints.push(format!(
+        "Use gateway_search_tools(query=\"{tool_name}\") to search the cached backend tool catalog."
+    ));
+
+    append_recovery_block(
+        format!("Tool '{tool_name}' not found in any backend cache."),
+        "Choose an available tool name and retry the same tool call.",
+        &hints,
+    )
+}
+
+/// Build the recovery message for a backend tool missing from a specific server.
+pub(crate) fn build_server_tool_not_found_message(
+    tool_name: &str,
+    server: &str,
+    backend_detail: Option<&str>,
+    suggestion: Option<String>,
+) -> String {
+    let base = match suggestion {
+        Some(_) => format!("Tool '{tool_name}' not found on server '{server}'."),
+        None => match backend_detail
+            .map(str::trim)
+            .filter(|detail| !detail.is_empty())
+        {
+            Some(detail) => format!("Tool '{tool_name}' not found on server '{server}'. {detail}"),
+            None => format!("Tool '{tool_name}' not found on server '{server}'."),
+        },
+    };
+
+    let mut hints = Vec::new();
+    if let Some(suggestion) = suggestion {
+        hints.push(suggestion);
+    }
+    hints.push(format!(
+        "Use gateway_list_tools(server=\"{server}\") to inspect the cached tools for this server."
+    ));
+    hints.push(format!(
+        "Use gateway_search_tools(query=\"{tool_name}\") to search for the right tool across all backends."
+    ));
+
+    append_recovery_block(
+        base,
+        "Choose an available tool name and retry the same tool call.",
+        &hints,
+    )
 }
 
 /// Extract the client protocol version from initialize params.
