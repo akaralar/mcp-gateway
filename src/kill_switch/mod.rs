@@ -35,6 +35,40 @@ use budget::BudgetWindow;
 #[cfg(test)]
 mod tests;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BudgetAction {
+    Ignore,
+    Warn,
+    Trigger,
+}
+
+#[must_use]
+pub(crate) fn decide_budget_action(
+    total_samples: usize,
+    min_samples: usize,
+    nearing_threshold: bool,
+    threshold_exceeded: bool,
+    already_disabled: bool,
+) -> BudgetAction {
+    if total_samples < min_samples {
+        return BudgetAction::Ignore;
+    }
+
+    if threshold_exceeded {
+        return if already_disabled {
+            BudgetAction::Ignore
+        } else {
+            BudgetAction::Trigger
+        };
+    }
+
+    if nearing_threshold {
+        return BudgetAction::Warn;
+    }
+
+    BudgetAction::Ignore
+}
+
 // ============================================================================
 // Kill switch
 // ============================================================================
@@ -145,31 +179,36 @@ impl KillSwitch {
         // Do not evaluate until we have enough data.
         let (successes, failures) = window.counts();
         let total = successes + failures;
-        if total < min_samples {
-            return false;
-        }
-
         let rate = window.error_rate();
         let usage_fraction = rate / threshold;
+        let action = decide_budget_action(
+            total,
+            min_samples,
+            (0.8..1.0).contains(&usage_fraction),
+            rate >= threshold,
+            self.is_killed(server),
+        );
 
-        if (0.8..1.0).contains(&usage_fraction) {
-            warn!(
-                server = server,
-                error_rate = rate,
-                threshold = threshold,
-                "Error budget at 80% — approaching auto-kill threshold"
-            );
-        }
-
-        if rate >= threshold && !self.is_killed(server) {
-            warn!(
-                server = server,
-                error_rate = rate,
-                threshold = threshold,
-                "Error budget exhausted — auto-killing server"
-            );
-            self.killed.insert(server.to_string());
-            return true;
+        match action {
+            BudgetAction::Warn => {
+                warn!(
+                    server = server,
+                    error_rate = rate,
+                    threshold = threshold,
+                    "Error budget at 80% — approaching auto-kill threshold"
+                );
+            }
+            BudgetAction::Trigger => {
+                warn!(
+                    server = server,
+                    error_rate = rate,
+                    threshold = threshold,
+                    "Error budget exhausted — auto-killing server"
+                );
+                self.killed.insert(server.to_string());
+                return true;
+            }
+            BudgetAction::Ignore => {}
         }
 
         false
@@ -279,32 +318,37 @@ impl KillSwitch {
 
         let (successes, failures) = window.counts();
         let total = successes + failures;
-        if total < cfg.min_samples {
-            return false;
-        }
-
         let rate = window.error_rate();
         let usage_fraction = rate / cfg.threshold;
+        let action = decide_budget_action(
+            total,
+            cfg.min_samples,
+            (0.8..1.0).contains(&usage_fraction),
+            rate >= cfg.threshold,
+            false,
+        );
 
-        if (0.8..1.0).contains(&usage_fraction) {
-            warn!(
-                capability = key,
-                error_rate = rate,
-                threshold = cfg.threshold,
-                "Capability error budget at 80% — approaching auto-disable threshold"
-            );
-        }
-
-        if rate >= cfg.threshold {
-            warn!(
-                capability = key,
-                error_rate = rate,
-                threshold = cfg.threshold,
-                "Capability error budget exhausted — auto-disabling capability"
-            );
-            drop(window);
-            self.disabled_capabilities.insert(key, Instant::now());
-            return true;
+        match action {
+            BudgetAction::Warn => {
+                warn!(
+                    capability = key,
+                    error_rate = rate,
+                    threshold = cfg.threshold,
+                    "Capability error budget at 80% — approaching auto-disable threshold"
+                );
+            }
+            BudgetAction::Trigger => {
+                warn!(
+                    capability = key,
+                    error_rate = rate,
+                    threshold = cfg.threshold,
+                    "Capability error budget exhausted — auto-disabling capability"
+                );
+                drop(window);
+                self.disabled_capabilities.insert(key, Instant::now());
+                return true;
+            }
+            BudgetAction::Ignore => {}
         }
 
         false
@@ -427,5 +471,41 @@ impl KillSwitch {
             return true;
         }
         false
+    }
+}
+
+#[cfg(kani)]
+mod verification {
+    use super::*;
+
+    #[kani::proof]
+    fn budget_decision_contract() {
+        let total_samples: usize = kani::any();
+        let min_samples: usize = kani::any();
+        let nearing_threshold: bool = kani::any();
+        let threshold_exceeded: bool = kani::any();
+        let already_disabled: bool = kani::any();
+
+        let decision = decide_budget_action(
+            total_samples,
+            min_samples,
+            nearing_threshold,
+            threshold_exceeded,
+            already_disabled,
+        );
+
+        if total_samples < min_samples {
+            assert_eq!(decision, BudgetAction::Ignore);
+        } else if threshold_exceeded {
+            if already_disabled {
+                assert_eq!(decision, BudgetAction::Ignore);
+            } else {
+                assert_eq!(decision, BudgetAction::Trigger);
+            }
+        } else if nearing_threshold {
+            assert_eq!(decision, BudgetAction::Warn);
+        } else {
+            assert_eq!(decision, BudgetAction::Ignore);
+        }
     }
 }
