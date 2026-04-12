@@ -32,14 +32,14 @@ These are all the same structural bug. If the agent is allowed to see every tool
 
 mcp-gateway fixes this structurally:
 
-- The agent never sees raw MCP servers. It sees **4 meta-tools**: `gateway_list_servers`, `gateway_list_tools`, `gateway_search_tools`, `gateway_invoke`.
+- The agent never sees raw MCP servers. It sees a **compact Meta-MCP surface** (12-15 tools): `gateway_list_servers`, `gateway_list_tools`, `gateway_search_tools`, `gateway_invoke`, plus operator helpers.
 - Every backend tool description flows through a validator before it ever lands in the agent's context window. Rule **AX-010** (`src/validator/rules/tool_poisoning.rs`, 19 tests) catches the Invariant Labs patterns: `<IMPORTANT>` tags, `~/.ssh`/`~/.aws`/`id_rsa`/`.env`/`/etc/passwd` paths, "sidenote" exfiltration language, curl-to-HTTP, base64 in exfil context, zero-width and bidi-override Unicode, 40+ consecutive spaces, and oversized descriptions. HIGH matches fail-closed; MEDIUM matches warn.
 - Every capability YAML can be hash-pinned with `mcp-gateway cap pin <file>`. The hash is reproducible from a shell with `grep -v '^sha256:' capability.yaml | sha256sum`. At load time and on every file-watch event the loader recomputes the hash and refuses any mismatch, logging `RUG-PULL DETECTED: capability YAML sha256 pin mismatch, unloading`. Implementation: `src/capability/hash.rs` and `src/capability/backend.rs::detect_rug_pulls`.
 - Capability YAMLs are the audit surface. They are small, diffable, grep-able, PR-reviewable. A compromised upstream cannot mutate them without tripping the hash.
 
 Numbers, all reproducible from the repo:
 
-- 4 meta-tools minimum; 14 in the README benchmark scenario (`benchmarks/public_claims.json`)
+- 12 meta-tools minimum; 14 in the README benchmark scenario (`benchmarks/public_claims.json`)
 - ~91% token savings at 100 tools / 1000 requests (Claude Opus pricing, `benchmarks/token_savings.py`)
 - ~8ms startup (`hyperfine` in `docs/BENCHMARKS.md`)
 - 2765 tests passing, `#![deny(unsafe_code)]`, zero clippy warnings
