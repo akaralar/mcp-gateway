@@ -16,6 +16,8 @@
 //! - `{env.VAR}` - Template format for environment variables
 
 mod credentials;
+pub mod graphql;
+pub mod jsonrpc;
 mod params;
 pub mod rest;
 mod xml;
@@ -192,19 +194,32 @@ impl CapabilityExecutor {
     ) -> Result<Value> {
         use rest::{ExecutionContext, ProtocolExecutor as _};
 
+        let ctx = ExecutionContext {
+            capability,
+            timeout_secs: provider.timeout,
+        };
+
         match protocol_config.protocol_name() {
             "rest" => {
                 let executor = rest::RestExecutor { executor: self };
-                let ctx = ExecutionContext {
-                    capability,
-                    timeout_secs: provider.timeout,
-                };
+                executor
+                    .execute(protocol_config, params.clone(), &ctx)
+                    .await
+            }
+            "graphql" => {
+                let executor = graphql::GraphqlExecutor { executor: self };
+                executor
+                    .execute(protocol_config, params.clone(), &ctx)
+                    .await
+            }
+            "jsonrpc" => {
+                let executor = jsonrpc::JsonRpcExecutor { executor: self };
                 executor
                     .execute(protocol_config, params.clone(), &ctx)
                     .await
             }
             other => Err(Error::Config(format!(
-                "Unsupported protocol '{other}'. Available: rest"
+                "Unsupported protocol '{other}'. Available: rest, graphql, jsonrpc"
             ))),
         }
     }
@@ -361,7 +376,11 @@ impl CapabilityExecutor {
     ///
     /// Credentials are fetched from secure storage and injected at runtime.
     /// They are NEVER logged or stored in memory longer than necessary.
-    async fn inject_auth(&self, headers: &mut HeaderMap, auth: &super::AuthConfig) -> Result<()> {
+    pub(super) async fn inject_auth(
+        &self,
+        headers: &mut HeaderMap,
+        auth: &super::AuthConfig,
+    ) -> Result<()> {
         let credential = self.fetch_credential(auth).await?;
 
         let header_name: HeaderName = auth

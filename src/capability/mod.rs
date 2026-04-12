@@ -50,6 +50,8 @@ pub use definition::*;
 #[cfg(feature = "discovery")]
 pub use discovery::{DiscoveryEngine, DiscoveryOptions, DiscoveryResult};
 pub use executor::CapabilityExecutor;
+pub use executor::graphql::GraphqlExecutor;
+pub use executor::jsonrpc::JsonRpcExecutor;
 pub use executor::rest::{ExecutionContext, ProtocolExecutor};
 pub use hash::{compute_capability_hash, rewrite_with_pin, strip_sha256_line};
 pub use loader::CapabilityLoader;

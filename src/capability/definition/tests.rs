@@ -443,15 +443,15 @@ fn provider_config_protocol_config_defaults_empty_service_to_rest() {
 
 #[test]
 fn provider_config_protocol_config_unknown_service_falls_back_to_rest() {
-    // GIVEN: ProviderConfig with unknown service = "graphql"
+    // GIVEN: ProviderConfig with unknown service = "grpc"
     // WHEN: calling protocol_config()
     // THEN: falls back to REST (backward compat)
     let provider = ProviderConfig {
-        service: "graphql".to_string(),
+        service: "grpc".to_string(),
         cost_per_call: 0.0,
         timeout: 30,
         config: RestConfig {
-            base_url: "https://graphql.example.com".to_string(),
+            base_url: "https://grpc.example.com".to_string(),
             ..Default::default()
         },
     };
@@ -460,7 +460,7 @@ fn provider_config_protocol_config_unknown_service_falls_back_to_rest() {
     assert_eq!(proto.protocol_name(), "rest");
     assert_eq!(
         proto.as_rest().unwrap().base_url,
-        "https://graphql.example.com"
+        "https://grpc.example.com"
     );
 }
 
@@ -501,4 +501,409 @@ config:
     let provider: ProviderConfig = serde_yaml::from_str(yaml).unwrap();
     assert_eq!(provider.service, "rest");
     assert_eq!(provider.protocol_config().protocol_name(), "rest");
+}
+
+// ── ProtocolConfig::Graphql tests ───────────────────────────────────
+
+#[test]
+fn protocol_config_graphql_round_trips_through_serde_json() {
+    // GIVEN: a ProtocolConfig::Graphql with populated fields
+    // WHEN: serialized to JSON and back
+    // THEN: all fields preserved
+    let config = ProtocolConfig::Graphql(GraphqlConfig {
+        endpoint: "https://api.github.com/graphql".to_string(),
+        headers: {
+            let mut h = HashMap::new();
+            h.insert("Authorization".to_string(), "Bearer token123".to_string());
+            h
+        },
+        query: Some("{ viewer { login } }".to_string()),
+        variables: {
+            let mut v = HashMap::new();
+            v.insert("first".to_string(), serde_json::json!(10));
+            v
+        },
+        response_path: Some("data.viewer".to_string()),
+    });
+
+    let json = serde_json::to_string(&config).unwrap();
+    let restored: ProtocolConfig = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored.protocol_name(), "graphql");
+    let gql = restored.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.github.com/graphql");
+    assert_eq!(gql.query.as_deref(), Some("{ viewer { login } }"));
+    assert_eq!(gql.variables.get("first"), Some(&serde_json::json!(10)));
+    assert_eq!(gql.response_path.as_deref(), Some("data.viewer"));
+    assert_eq!(gql.headers.get("Authorization").unwrap(), "Bearer token123");
+}
+
+#[test]
+fn protocol_config_graphql_round_trips_through_serde_yaml() {
+    let config = ProtocolConfig::Graphql(GraphqlConfig {
+        endpoint: "https://api.example.com/graphql".to_string(),
+        query: Some("{ users { id } }".to_string()),
+        ..Default::default()
+    });
+
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let restored: ProtocolConfig = serde_yaml::from_str(&yaml).unwrap();
+
+    assert_eq!(restored.protocol_name(), "graphql");
+    let gql = restored.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.example.com/graphql");
+}
+
+#[test]
+fn protocol_config_graphql_protocol_name_returns_graphql() {
+    let config = ProtocolConfig::Graphql(GraphqlConfig::default());
+    assert_eq!(config.protocol_name(), "graphql");
+}
+
+#[test]
+fn protocol_config_as_graphql_returns_some_for_graphql_variant() {
+    let config = ProtocolConfig::Graphql(GraphqlConfig {
+        endpoint: "https://example.com/graphql".to_string(),
+        ..Default::default()
+    });
+    assert!(config.as_graphql().is_some());
+    assert!(config.as_rest().is_none());
+}
+
+#[test]
+fn protocol_config_as_rest_returns_none_for_graphql_variant() {
+    let config = ProtocolConfig::Graphql(GraphqlConfig::default());
+    assert!(config.as_rest().is_none());
+}
+
+#[test]
+fn protocol_config_as_graphql_returns_none_for_rest_variant() {
+    let config = ProtocolConfig::Rest(RestConfig::default());
+    assert!(config.as_graphql().is_none());
+}
+
+// ── ProviderConfig::protocol_config() bridge for GraphQL ────────────
+
+#[test]
+fn provider_config_graphql_service_maps_to_graphql_protocol() {
+    // GIVEN: ProviderConfig with service = "graphql"
+    // WHEN: calling protocol_config()
+    // THEN: returns ProtocolConfig::Graphql
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            endpoint: "https://api.github.com/graphql".to_string(),
+            headers: {
+                let mut h = HashMap::new();
+                h.insert("Accept".to_string(), "application/json".to_string());
+                h
+            },
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "graphql");
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.github.com/graphql");
+    assert_eq!(gql.headers.get("Accept").unwrap(), "application/json");
+}
+
+#[test]
+fn provider_config_graphql_uses_base_url_plus_path_when_no_endpoint() {
+    // GIVEN: ProviderConfig with service = "graphql" and base_url+path
+    // WHEN: calling protocol_config()
+    // THEN: endpoint is base_url + path
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            base_url: "https://api.example.com".to_string(),
+            path: "/graphql".to_string(),
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.example.com/graphql");
+}
+
+#[test]
+fn provider_config_graphql_extracts_query_from_body_string() {
+    // GIVEN: ProviderConfig with body as a string (the query)
+    // WHEN: calling protocol_config()
+    // THEN: query is extracted from body
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            endpoint: "https://api.example.com/graphql".to_string(),
+            body: Some(serde_json::json!("{ viewer { login } }")),
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.query.as_deref(), Some("{ viewer { login } }"));
+}
+
+#[test]
+fn provider_config_graphql_extracts_query_from_body_object() {
+    // GIVEN: ProviderConfig with body as { query: "..." }
+    // WHEN: calling protocol_config()
+    // THEN: query is extracted from body.query
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            endpoint: "https://api.example.com/graphql".to_string(),
+            body: Some(serde_json::json!({ "query": "{ users { id } }" })),
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.query.as_deref(), Some("{ users { id } }"));
+}
+
+#[test]
+fn provider_config_graphql_maps_static_params_to_variables() {
+    // GIVEN: ProviderConfig with static_params
+    // WHEN: calling protocol_config()
+    // THEN: static_params become graphql variables
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            endpoint: "https://api.example.com/graphql".to_string(),
+            static_params: {
+                let mut m = HashMap::new();
+                m.insert("first".to_string(), serde_json::json!(5));
+                m
+            },
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.variables.get("first"), Some(&serde_json::json!(5)));
+}
+
+#[test]
+fn provider_config_graphql_preserves_response_path() {
+    let provider = ProviderConfig {
+        service: "graphql".to_string(),
+        cost_per_call: 0.0,
+        timeout: 30,
+        config: RestConfig {
+            endpoint: "https://api.example.com/graphql".to_string(),
+            response_path: Some("data.viewer".to_string()),
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.response_path.as_deref(), Some("data.viewer"));
+}
+
+#[test]
+fn provider_config_graphql_deserialized_from_yaml() {
+    // GIVEN: YAML with service: graphql
+    // WHEN: deserialized and mapped
+    // THEN: produces correct GraphqlConfig
+    let yaml = r#"
+service: graphql
+timeout: 15
+config:
+  endpoint: https://api.github.com/graphql
+  headers:
+    Accept: application/json
+    User-Agent: mcp-gateway
+  body:
+    query: "query { viewer { login name } }"
+"#;
+    let provider: ProviderConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(provider.service, "graphql");
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "graphql");
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.github.com/graphql");
+    assert_eq!(
+        gql.query.as_deref(),
+        Some("query { viewer { login name } }")
+    );
+    assert_eq!(gql.headers.get("Accept").unwrap(), "application/json");
+}
+
+// ── Sample capability YAML loads correctly ──────────────────────────
+
+#[test]
+fn github_graphql_sample_capability_loads() {
+    // GIVEN: the github_graphql.yaml sample capability
+    // WHEN: parsed as CapabilityDefinition
+    // THEN: all fields are correct and service maps to graphql
+    let yaml = include_str!("../../../capabilities/examples/github_graphql.yaml");
+    let cap: CapabilityDefinition = serde_yaml::from_str(yaml).unwrap();
+
+    assert_eq!(cap.name, "github_graphql_viewer");
+    assert!(cap.description.contains("GraphQL"));
+    assert!(cap.auth.required);
+    assert_eq!(cap.auth.key, "env:GITHUB_TOKEN");
+
+    let provider = cap.providers.get("primary").unwrap();
+    assert_eq!(provider.service, "graphql");
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "graphql");
+    let gql = proto.as_graphql().unwrap();
+    assert_eq!(gql.endpoint, "https://api.github.com/graphql");
+    assert!(gql.query.as_deref().unwrap().contains("viewer"));
+}
+
+// ── JSON-RPC ProtocolConfig tests ──────────────────────────────────
+
+#[test]
+fn protocol_config_jsonrpc_round_trips_through_serde_json() {
+    let config = ProtocolConfig::Jsonrpc(JsonRpcConfig {
+        endpoint: "http://localhost:8545".to_string(),
+        method: "eth_blockNumber".to_string(),
+        headers: {
+            let mut h = HashMap::new();
+            h.insert("Authorization".to_string(), "Bearer token123".to_string());
+            h
+        },
+        default_params: serde_json::json!({"tag": "latest"}),
+    });
+
+    let json = serde_json::to_string(&config).unwrap();
+    let restored: ProtocolConfig = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(restored.protocol_name(), "jsonrpc");
+    let jrpc = restored.as_jsonrpc().unwrap();
+    assert_eq!(jrpc.endpoint, "http://localhost:8545");
+    assert_eq!(jrpc.method, "eth_blockNumber");
+    assert_eq!(jrpc.default_params["tag"], "latest");
+    assert_eq!(
+        jrpc.headers.get("Authorization").unwrap(),
+        "Bearer token123"
+    );
+}
+
+#[test]
+fn protocol_config_jsonrpc_round_trips_through_serde_yaml() {
+    let config = ProtocolConfig::Jsonrpc(JsonRpcConfig {
+        endpoint: "http://localhost:8080/rpc".to_string(),
+        method: "system.listMethods".to_string(),
+        ..Default::default()
+    });
+
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let restored: ProtocolConfig = serde_yaml::from_str(&yaml).unwrap();
+
+    assert_eq!(restored.protocol_name(), "jsonrpc");
+    let jrpc = restored.as_jsonrpc().unwrap();
+    assert_eq!(jrpc.endpoint, "http://localhost:8080/rpc");
+    assert_eq!(jrpc.method, "system.listMethods");
+}
+
+#[test]
+fn protocol_config_as_jsonrpc_returns_none_for_non_jsonrpc() {
+    let rest = ProtocolConfig::Rest(RestConfig::default());
+    assert!(rest.as_jsonrpc().is_none());
+
+    let gql = ProtocolConfig::Graphql(GraphqlConfig::default());
+    assert!(gql.as_jsonrpc().is_none());
+}
+
+// ── ProviderConfig::protocol_config() bridge for JSON-RPC ─────────
+
+#[test]
+fn provider_config_jsonrpc_service_maps_to_jsonrpc_protocol() {
+    let provider = ProviderConfig {
+        service: "jsonrpc".to_string(),
+        cost_per_call: 0.0,
+        timeout: 10,
+        config: RestConfig {
+            endpoint: "http://localhost:8545".to_string(),
+            method: "eth_getBalance".to_string(),
+            headers: {
+                let mut h = HashMap::new();
+                h.insert("Accept".to_string(), "application/json".to_string());
+                h
+            },
+            static_params: {
+                let mut m = HashMap::new();
+                m.insert("tag".to_string(), serde_json::json!("latest"));
+                m
+            },
+            ..Default::default()
+        },
+    };
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "jsonrpc");
+    let jrpc = proto.as_jsonrpc().unwrap();
+    assert_eq!(jrpc.endpoint, "http://localhost:8545");
+    assert_eq!(jrpc.method, "eth_getBalance");
+    assert_eq!(jrpc.headers.get("Accept").unwrap(), "application/json");
+    assert_eq!(jrpc.default_params["tag"], "latest");
+}
+
+#[test]
+fn provider_config_jsonrpc_deserialized_from_yaml() {
+    let yaml = r#"
+service: jsonrpc
+timeout: 10
+config:
+  endpoint: http://localhost:8545
+  method: eth_blockNumber
+  headers:
+    Accept: application/json
+  static_params:
+    tag: "latest"
+"#;
+    let provider: ProviderConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(provider.service, "jsonrpc");
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "jsonrpc");
+    let jrpc = proto.as_jsonrpc().unwrap();
+    assert_eq!(jrpc.endpoint, "http://localhost:8545");
+    assert_eq!(jrpc.method, "eth_blockNumber");
+    assert_eq!(jrpc.default_params["tag"], "latest");
+}
+
+// ── Sample JSON-RPC capability YAML loads correctly ────────────────
+
+#[test]
+fn jsonrpc_sample_capability_loads() {
+    let yaml = include_str!("../../../capabilities/examples/jsonrpc_example.yaml");
+    let cap: CapabilityDefinition = serde_yaml::from_str(yaml).unwrap();
+
+    assert_eq!(cap.name, "jsonrpc_eth_block_number");
+    assert!(cap.description.contains("block number"));
+    assert!(!cap.auth.required);
+
+    let provider = cap.providers.get("primary").unwrap();
+    assert_eq!(provider.service, "jsonrpc");
+    assert_eq!(provider.timeout, 10);
+
+    let proto = provider.protocol_config();
+    assert_eq!(proto.protocol_name(), "jsonrpc");
+    let jrpc = proto.as_jsonrpc().unwrap();
+    assert_eq!(jrpc.endpoint, "http://localhost:8545");
+    assert_eq!(jrpc.method, "eth_blockNumber");
+    assert_eq!(jrpc.default_params["tag"], "latest");
 }

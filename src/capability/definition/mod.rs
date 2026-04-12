@@ -201,10 +201,60 @@ impl ProviderConfig {
     /// (or omits the field, which defaults to `"rest"`).
     #[must_use]
     pub fn protocol_config(&self) -> ProtocolConfig {
-        // Phase 1: everything maps to REST. Future phases will match on
-        // self.service and construct the appropriate variant.
         match self.service.as_str() {
             "rest" | "" => ProtocolConfig::Rest(self.config.clone()),
+            "graphql" => {
+                // Build GraphqlConfig from the flat RestConfig fields.
+                // The YAML `config:` block uses RestConfig for all service
+                // types — we map the relevant fields to GraphqlConfig here.
+                ProtocolConfig::Graphql(GraphqlConfig {
+                    endpoint: if self.config.endpoint.is_empty() {
+                        format!("{}{}", self.config.base_url, self.config.path)
+                    } else {
+                        self.config.endpoint.clone()
+                    },
+                    headers: self.config.headers.clone(),
+                    query: self
+                        .config
+                        .body
+                        .as_ref()
+                        .and_then(|b| b.as_str().map(ToString::to_string))
+                        .or_else(|| {
+                            // Also check for a `query` field in the body object
+                            self.config
+                                .body
+                                .as_ref()
+                                .and_then(|b| b.get("query"))
+                                .and_then(|q| q.as_str())
+                                .map(ToString::to_string)
+                        }),
+                    variables: self.config.static_params.clone(),
+                    response_path: self.config.response_path.clone(),
+                })
+            }
+            "jsonrpc" => {
+                // Build JsonRpcConfig from the flat RestConfig fields.
+                ProtocolConfig::Jsonrpc(JsonRpcConfig {
+                    endpoint: if self.config.endpoint.is_empty() {
+                        format!("{}{}", self.config.base_url, self.config.path)
+                    } else {
+                        self.config.endpoint.clone()
+                    },
+                    method: self.config.method.clone(),
+                    headers: self.config.headers.clone(),
+                    default_params: if self.config.static_params.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::Value::Object(
+                            self.config
+                                .static_params
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect(),
+                        )
+                    },
+                })
+            }
             // Unknown service → fall back to REST with a tracing warning.
             // This preserves backward compat if someone has a typo or
             // uses a service name that isn't implemented yet.
@@ -365,11 +415,81 @@ fn default_method() -> String {
     "GET".to_string()
 }
 
+/// GraphQL API configuration
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GraphqlConfig {
+    /// GraphQL endpoint URL (e.g. `https://api.github.com/graphql`)
+    #[serde(default)]
+    pub endpoint: String,
+
+    /// HTTP headers to send (supports `{env.VAR}` substitution for auth)
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+
+    /// Default query template.
+    ///
+    /// Supports `{param}` substitution — caller-supplied parameters replace
+    /// matching placeholders in the query string before it is sent.
+    #[serde(default)]
+    pub query: Option<String>,
+
+    /// Default GraphQL variables.
+    ///
+    /// These are merged with caller-supplied variables (caller wins on key
+    /// collision) and sent in the `variables` field of the JSON body.
+    #[serde(default)]
+    pub variables: HashMap<String, serde_json::Value>,
+
+    /// Response path for extracting a nested field from the GraphQL `data`
+    /// response (dot-separated, e.g. `"data.viewer"`).
+    #[serde(default)]
+    pub response_path: Option<String>,
+}
+
+/// JSON-RPC 2.0 API configuration
+///
+/// Defines how to call a JSON-RPC 2.0 service: the endpoint URL, the
+/// method name, optional default parameters, and HTTP headers.
+///
+/// Note: `GraphqlConfig` uses `#[derive(Default)]` on the struct definition.
+///
+/// At execution time the executor builds a spec-compliant request:
+///
+/// ```json
+/// { "jsonrpc": "2.0", "id": "<uuid>", "method": "<method>", "params": <merged> }
+/// ```
+///
+/// Default parameters from `default_params` are merged with caller-supplied
+/// parameters (caller wins on key collision), mirroring the merge semantics
+/// used by `RestConfig::static_params` and `GraphqlConfig::variables`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JsonRpcConfig {
+    /// JSON-RPC endpoint URL (e.g. `http://localhost:8545`)
+    #[serde(default)]
+    pub endpoint: String,
+
+    /// JSON-RPC method name (e.g. `eth_blockNumber`, `system.listMethods`)
+    #[serde(default)]
+    pub method: String,
+
+    /// HTTP headers to send (supports `{env.VAR}` substitution for auth)
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+
+    /// Default parameters merged with caller-supplied params.
+    ///
+    /// Caller-supplied keys always win on collision. This is analogous to
+    /// `RestConfig::static_params` / `GraphqlConfig::variables`.
+    #[serde(default)]
+    pub default_params: serde_json::Value,
+}
+
+// Note: JsonRpcConfig and GraphqlConfig both use #[derive(Default)]
+// on their struct definitions above, so no manual impl is needed.
+
 /// Protocol-specific configuration, derived from `ProviderConfig.service` + `config`.
 ///
-/// This enum is the extension point for future protocol adapters. Phase 1
-/// supports only `Rest`; adding a new variant (e.g. `Graphql`, `Grpc`) is a
-/// one-line enum addition plus a new `ProtocolExecutor` implementation.
+/// This enum is the extension point for future protocol adapters.
 ///
 /// `ProtocolConfig` is NOT deserialized from YAML directly — it is produced
 /// by [`ProviderConfig::protocol_config()`] to preserve backward
@@ -379,10 +499,12 @@ fn default_method() -> String {
 pub enum ProtocolConfig {
     /// REST/HTTP protocol (the original and default).
     Rest(RestConfig),
-    // Future variants (NOT in this PR):
-    // Graphql(GraphqlConfig),
+    /// GraphQL protocol — sends `{ query, variables }` as a POST.
+    Graphql(GraphqlConfig),
+    /// JSON-RPC 2.0 protocol — sends `{ jsonrpc, id, method, params }` as a POST.
+    Jsonrpc(JsonRpcConfig),
+    // Future variants:
     // Grpc(GrpcConfig),
-    // Jsonrpc(JsonRpcConfig),
     // Cli(CliConfig),
     // Wasm(WasmConfig),
 }
@@ -393,6 +515,8 @@ impl ProtocolConfig {
     pub fn protocol_name(&self) -> &'static str {
         match self {
             ProtocolConfig::Rest(_) => "rest",
+            ProtocolConfig::Graphql(_) => "graphql",
+            ProtocolConfig::Jsonrpc(_) => "jsonrpc",
         }
     }
 
@@ -401,6 +525,25 @@ impl ProtocolConfig {
     pub fn as_rest(&self) -> Option<&RestConfig> {
         match self {
             ProtocolConfig::Rest(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Extract the inner `GraphqlConfig`, if this is a GraphQL protocol.
+    #[must_use]
+    pub fn as_graphql(&self) -> Option<&GraphqlConfig> {
+        match self {
+            ProtocolConfig::Graphql(c) => Some(c),
+            _ => None,
+        }
+    }
+
+    /// Extract the inner `JsonRpcConfig`, if this is a JSON-RPC protocol.
+    #[must_use]
+    pub fn as_jsonrpc(&self) -> Option<&JsonRpcConfig> {
+        match self {
+            ProtocolConfig::Jsonrpc(c) => Some(c),
+            _ => None,
         }
     }
 }
