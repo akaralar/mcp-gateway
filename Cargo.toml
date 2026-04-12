@@ -12,6 +12,30 @@ documentation = "https://github.com/MikkoParkkola/mcp-gateway#readme"
 readme = "README.md"
 keywords = ["mcp", "model-context", "gateway", "proxy", "ai"]
 categories = ["command-line-utilities", "network-programming", "web-programming"]
+# Keep the published crate focused on build/runtime assets and the fixtures
+# needed by package verification tests.
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "llms.txt",
+    "demo.tape",
+    "src/**",
+    "tests/**",
+    "benches/**",
+    "benchmarks/**",
+    "capabilities/**",
+    "examples/**",
+    "docs/ARCHITECTURE.md",
+    "docs/BENCHMARKS.md",
+    "docs/COMMUNITY_REGISTRY.md",
+    "docs/QUICKSTART.md",
+]
 
 [dependencies]
 # Async runtime
