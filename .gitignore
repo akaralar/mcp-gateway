@@ -20,7 +20,6 @@ config.yaml
 # User capabilities (may contain credential references)
 /capabilities/*.yaml
 !/capabilities/examples/
-!/capabilities/examples/
 
 # Claude Code
 .claude/
@@ -29,7 +28,6 @@ config.yaml
 .mypy_cache/
 .ruff_cache/
 .tiers/
-config.yaml
 /dist/
 
 # Local cargo config

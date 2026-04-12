@@ -12,9 +12,9 @@ number of tools across all backends.
 Meta-MCP approach: The discovery quartet stays fixed
 (`gateway_list_servers`, `gateway_list_tools`, `gateway_search_tools`,
 `gateway_invoke`). The canonical README benchmark adds stats, cost reporting,
-playbooks, profiles, kill/revive, disabled-capability visibility, and reload
-for a 14-tool surface. Surfacing webhook status raises that operational
-surface to 15 (the minimum stripped surface is 12).
+playbooks, profiles, kill/revive, disabled-capability visibility, workflow
+state control, and reload for a 15-tool surface. Surfacing webhook status
+raises that operational surface to 16 (the minimum stripped surface is 13).
 
 Usage:
     python benchmarks/token_savings.py
@@ -258,6 +258,17 @@ GATEWAY_TOOLS = [
     make_gateway_tool_definition(
         "gateway_list_profiles",
         "List all available routing profiles with their descriptions.",
+    ),
+    make_gateway_tool_definition(
+        "gateway_set_state",
+        "Transition the session to a new workflow state so state-gated capabilities appear or disappear in tools/list.",
+        properties={
+            "state": {
+                "type": "string",
+                "description": 'Target workflow state name (e.g. "checkout", "payment", "default").',
+            }
+        },
+        required=["state"],
     ),
     make_gateway_tool_definition(
         "gateway_reload_config",

@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::autotag;
 use crate::ranking::json_to_search_result;
+use crate::routing_profile::RoutingProfile;
 use crate::{Error, Result};
 
 use super::super::differential::annotate_differential;
@@ -22,44 +23,47 @@ use super::support::{
     ranked_results_to_code_mode_json,
 };
 
+#[derive(Clone, Copy)]
+struct CodeModeSearchOptions {
+    include_schema: bool,
+    use_glob: bool,
+}
+
 impl MetaMcp {
-    /// Handle `gateway_search` — Code Mode tool search with glob and schema support.
-    ///
-    /// Behaves like `search_tools` but:
-    /// - Supports glob patterns (`*`, `?`) on tool names in addition to keyword matching.
-    /// - Returns tool references in `"server:tool_name"` format (for use with `gateway_execute`).
-    /// - Optionally includes the full `input_schema` for each result (`include_schema`, default `true`).
-    pub(super) async fn code_mode_search(
+    fn current_search_state(&self, session_id: Option<&str>) -> String {
+        session_id.map_or_else(
+            || crate::gateway::state::DEFAULT_STATE.to_string(),
+            |sid| self.session_state.get_state(sid),
+        )
+    }
+
+    fn code_mode_tool_matches(tool: &crate::protocol::Tool, query: &str, use_glob: bool) -> bool {
+        if use_glob {
+            tool_matches_glob(tool, query)
+        } else {
+            tool_matches_query(tool, query)
+        }
+    }
+
+    fn collect_code_mode_capability_matches(
         &self,
-        args: &Value,
-        session_id: Option<&str>,
-    ) -> Result<Value> {
-        let raw_query = extract_required_str(args, "query")?;
-        let query = raw_query.to_lowercase();
-        let limit = extract_search_limit(args);
-        let include_schema = extract_bool_or(args, "include_schema", true);
-        let profile = self.active_profile(session_id);
-        let use_glob = is_glob_pattern(&query);
-
-        let mut matches: Vec<Value> = Vec::new();
-        let mut all_tags: Vec<String> = Vec::new();
-
-        // Search capability backend — filtered by FSM state
+        query: &str,
+        current_state: &str,
+        profile: &RoutingProfile,
+        options: CodeModeSearchOptions,
+        matches: &mut Vec<Value>,
+        all_tags: &mut Vec<String>,
+    ) {
         if let Some(cap) = self.get_capabilities()
             && profile.backend_allowed(&cap.name)
         {
-            let current_state = session_id.map_or_else(
-                || crate::gateway::state::DEFAULT_STATE.to_string(),
-                |sid| self.session_state.get_state(sid),
-            );
             let cap_killed = self.kill_switch.is_killed(&cap.name);
             for capability in cap.list_capabilities() {
-                // FSM state filter
                 if !capability.visible_in_states.is_empty()
                     && !capability
                         .visible_in_states
                         .iter()
-                        .any(|s| s == &current_state)
+                        .any(|s| s == current_state)
                 {
                     continue;
                 }
@@ -67,14 +71,10 @@ impl MetaMcp {
                 if !profile.tool_allowed(&tool.name) {
                     continue;
                 }
-                collect_tool_tags_for_code_mode(&tool, &mut all_tags);
-                let is_match = if use_glob {
-                    tool_matches_glob(&tool, &query)
-                } else {
-                    tool_matches_query(&tool, &query)
-                };
-                if is_match {
-                    let mut entry = build_code_mode_match_json(&cap.name, &tool, include_schema);
+                collect_tool_tags_for_code_mode(&tool, all_tags);
+                if Self::code_mode_tool_matches(&tool, query, options.use_glob) {
+                    let mut entry =
+                        build_code_mode_match_json(&cap.name, &tool, options.include_schema);
                     if cap_killed {
                         entry["status"] = json!("disabled");
                     }
@@ -82,13 +82,18 @@ impl MetaMcp {
                 }
             }
         }
+    }
 
-        // Search MCP backends with cached tools
+    async fn collect_code_mode_backend_matches(
+        &self,
+        query: &str,
+        profile: &RoutingProfile,
+        options: CodeModeSearchOptions,
+        matches: &mut Vec<Value>,
+        all_tags: &mut Vec<String>,
+    ) {
         for backend in self.backends.all() {
-            if !backend.has_cached_tools() {
-                continue;
-            }
-            if !profile.backend_allowed(&backend.name) {
+            if !backend.has_cached_tools() || !profile.backend_allowed(&backend.name) {
                 continue;
             }
             let backend_killed = self.kill_switch.is_killed(&backend.name);
@@ -106,17 +111,15 @@ impl MetaMcp {
                     .collect();
 
                 for tool in &enriched {
-                    collect_tool_tags_for_code_mode(tool, &mut all_tags);
+                    collect_tool_tags_for_code_mode(tool, all_tags);
                 }
                 for tool in enriched {
-                    let is_match = if use_glob {
-                        tool_matches_glob(&tool, &query)
-                    } else {
-                        tool_matches_query(&tool, &query)
-                    };
-                    if is_match {
-                        let mut entry =
-                            build_code_mode_match_json(&backend.name, &tool, include_schema);
+                    if Self::code_mode_tool_matches(&tool, query, options.use_glob) {
+                        let mut entry = build_code_mode_match_json(
+                            &backend.name,
+                            &tool,
+                            options.include_schema,
+                        );
                         if backend_killed {
                             entry["status"] = json!("disabled");
                         }
@@ -125,6 +128,132 @@ impl MetaMcp {
                 }
             }
         }
+    }
+
+    fn collect_search_capability_matches(
+        &self,
+        query: &str,
+        current_state: &str,
+        profile: &RoutingProfile,
+        matches: &mut Vec<Value>,
+        all_tags: &mut Vec<String>,
+    ) {
+        if let Some(cap) = self.get_capabilities()
+            && profile.backend_allowed(&cap.name)
+        {
+            let cap_killed = self.kill_switch.is_killed(&cap.name);
+            for capability in cap.list_capabilities() {
+                if !capability.visible_in_states.is_empty()
+                    && !capability
+                        .visible_in_states
+                        .iter()
+                        .any(|s| s == current_state)
+                {
+                    continue;
+                }
+                let tool = capability.to_mcp_tool();
+                if !profile.tool_allowed(&tool.name) {
+                    continue;
+                }
+                collect_tool_tags(&tool, all_tags);
+                if tool_matches_query(&tool, query) {
+                    let mut entry = build_match_json_with_chains(
+                        &cap.name,
+                        &tool,
+                        &capability.metadata.chains_with,
+                    );
+                    if cap_killed {
+                        entry["status"] = json!("disabled");
+                    }
+                    matches.push(entry);
+                }
+            }
+        }
+    }
+
+    async fn collect_search_backend_matches(
+        &self,
+        query: &str,
+        profile: &RoutingProfile,
+        matches: &mut Vec<Value>,
+        all_tags: &mut Vec<String>,
+    ) {
+        for backend in self.backends.all() {
+            if !backend.has_cached_tools() || !profile.backend_allowed(&backend.name) {
+                continue;
+            }
+            let backend_killed = self.kill_switch.is_killed(&backend.name);
+            if let Ok(tools) = backend.get_tools_shared().await {
+                let enriched: Vec<_> = tools
+                    .iter()
+                    .filter(|t| profile.tool_allowed(&t.name))
+                    .map(|tool| {
+                        let mut t = tool.clone();
+                        if let Some(ref desc) = t.description {
+                            t.description = Some(autotag::enrich_description(desc));
+                        }
+                        t
+                    })
+                    .collect();
+
+                for tool in &enriched {
+                    collect_tool_tags(tool, all_tags);
+                }
+                for tool in enriched {
+                    if tool_matches_query(&tool, query) {
+                        let mut entry = build_match_json(&backend.name, &tool);
+                        if backend_killed {
+                            entry["status"] = json!("disabled");
+                        }
+                        matches.push(entry);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle `gateway_search` — Code Mode tool search with glob and schema support.
+    ///
+    /// Behaves like `search_tools` but:
+    /// - Supports glob patterns (`*`, `?`) on tool names in addition to keyword matching.
+    /// - Returns tool references in `"server:tool_name"` format (for use with `gateway_execute`).
+    /// - Optionally includes the full `input_schema` for each result (`include_schema`, default `true`).
+    pub(super) async fn code_mode_search(
+        &self,
+        args: &Value,
+        session_id: Option<&str>,
+    ) -> Result<Value> {
+        let raw_query = extract_required_str(args, "query")?;
+        let query = raw_query.to_lowercase();
+        let limit = extract_search_limit(args);
+        let include_schema = extract_bool_or(args, "include_schema", true);
+        let profile = self.active_profile(session_id);
+        let use_glob = is_glob_pattern(&query);
+        let current_state = self.current_search_state(session_id);
+        let options = CodeModeSearchOptions {
+            include_schema,
+            use_glob,
+        };
+
+        let mut matches: Vec<Value> = Vec::new();
+        let mut all_tags: Vec<String> = Vec::new();
+
+        self.collect_code_mode_capability_matches(
+            &query,
+            &current_state,
+            &profile,
+            options,
+            &mut matches,
+            &mut all_tags,
+        );
+        self.collect_code_mode_backend_matches(
+            &query,
+            &profile,
+            options,
+            &mut matches,
+            &mut all_tags,
+        )
+        .await;
 
         let total_found = matches.len();
 
@@ -395,95 +524,21 @@ impl MetaMcp {
         let limit = extract_search_limit(args);
         let profile = self.active_profile(session_id);
         let search_start = std::time::Instant::now();
+        let current_state = self.current_search_state(session_id);
 
         let mut matches = Vec::new();
         // Collect all available tags for suggestion generation (only used on zero-result queries).
         let mut all_tags: Vec<String> = Vec::new();
 
-        // Search capability backend exhaustively (fast, no network, all in memory).
-        // Iterates over full CapabilityDefinition to include composition metadata.
-        // Capabilities with a non-empty `visible_in_states` are only included when
-        // the session's current FSM state appears in the list.
-        if let Some(cap) = self.get_capabilities()
-            && profile.backend_allowed(&cap.name)
-        {
-            let current_state = session_id.map_or_else(
-                || crate::gateway::state::DEFAULT_STATE.to_string(),
-                |sid| self.session_state.get_state(sid),
-            );
-            let cap_killed = self.kill_switch.is_killed(&cap.name);
-            for capability in cap.list_capabilities() {
-                // FSM state filter: skip if visible_in_states is non-empty and current state
-                // is not in the list.
-                if !capability.visible_in_states.is_empty()
-                    && !capability
-                        .visible_in_states
-                        .iter()
-                        .any(|s| s == &current_state)
-                {
-                    continue;
-                }
-                let tool = capability.to_mcp_tool();
-                if !profile.tool_allowed(&tool.name) {
-                    continue;
-                }
-                collect_tool_tags(&tool, &mut all_tags);
-                if tool_matches_query(&tool, &query) {
-                    let mut entry = build_match_json_with_chains(
-                        &cap.name,
-                        &tool,
-                        &capability.metadata.chains_with,
-                    );
-                    if cap_killed {
-                        entry["status"] = json!("disabled");
-                    }
-                    matches.push(entry);
-                }
-            }
-        }
-
-        // Search MCP backends that have cached tools (fast, no blocking starts).
-        // Backends without cached tools are skipped — use gateway_list_tools(server=X)
-        // to force-start a specific backend.
-        for backend in self.backends.all() {
-            // Only query backends with cached tools to avoid blocking on unstarted backends
-            if !backend.has_cached_tools() {
-                continue;
-            }
-            if !profile.backend_allowed(&backend.name) {
-                continue;
-            }
-            let backend_killed = self.kill_switch.is_killed(&backend.name);
-            if let Ok(tools) = backend.get_tools_shared().await {
-                // Enrich each tool's description with auto-extracted keyword tags so
-                // that MCP backend tools participate in keyword matching just like
-                // capability tools that carry explicit [keywords: ...] tags.
-                let enriched: Vec<_> = tools
-                    .iter()
-                    .filter(|t| profile.tool_allowed(&t.name))
-                    .map(|tool| {
-                        let mut t = tool.clone();
-                        if let Some(ref desc) = t.description {
-                            t.description = Some(autotag::enrich_description(desc));
-                        }
-                        t
-                    })
-                    .collect();
-
-                for tool in &enriched {
-                    collect_tool_tags(tool, &mut all_tags);
-                }
-                for tool in enriched {
-                    if tool_matches_query(&tool, &query) {
-                        let mut entry = build_match_json(&backend.name, &tool);
-                        if backend_killed {
-                            entry["status"] = json!("disabled");
-                        }
-                        matches.push(entry);
-                    }
-                }
-            }
-        }
+        self.collect_search_capability_matches(
+            &query,
+            &current_state,
+            &profile,
+            &mut matches,
+            &mut all_tags,
+        );
+        self.collect_search_backend_matches(&query, &profile, &mut matches, &mut all_tags)
+            .await;
 
         let total_found = matches.len();
 

@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- **Rust 1.85+** (edition 2024): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Rust 1.88+** (edition 2024): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - **Node.js** (only for testing stdio backends that use `npx`)
 
 ### Build and Test
@@ -15,13 +15,16 @@ cd mcp-gateway
 cargo build
 cargo test --all-features   # full suite, all must pass
 cargo run -- init    # Generate a starter config
-cargo run -- --config gateway.yaml --log-level debug
+cargo run -- serve --config gateway.yaml --log-level debug
 ```
 
 ### Full CI Check (Run Before Pushing)
 
 ```bash
-cargo fmt --check && cargo clippy -- -W clippy::pedantic && cargo test
+cargo fmt --all -- --check && \
+cargo clippy --all-features -- -D warnings && \
+cargo test --all-features && \
+python3 benchmarks/token_savings.py --scenario readme --json
 ```
 
 ## Code Organization
@@ -147,7 +150,7 @@ impl Transport for MyTransport {
 ## Code Style
 
 - **Formatting:** `cargo fmt` before every commit. CI rejects unformatted code.
-- **Linting:** `cargo clippy -- -W clippy::pedantic`. Pedantic is enforced in CI.
+- **Linting:** `cargo clippy --all-features -- -D warnings`. Pedantic warnings are promoted to errors in CI.
 - **Safety:** `unsafe` code is denied at the crate level. No exceptions.
 - **Errors:** `thiserror` for typed errors, `anyhow` for application-level.
 - **Logging:** `tracing` macros (`info!`, `debug!`, `warn!`), never `println!`.
@@ -159,7 +162,7 @@ Allowed clippy exceptions (in `Cargo.toml`): `module_name_repetitions`, `must_us
 ## Pull Request Process
 
 1. **Branch** from `main`: `git checkout -b feature/your-feature`
-2. **Verify:** `cargo fmt --check && cargo clippy -- -W clippy::pedantic && cargo test`
+2. **Verify:** `cargo fmt --all -- --check && cargo clippy --all-features -- -D warnings && cargo test --all-features && python3 benchmarks/token_savings.py --scenario readme --json`
 3. **Document:** Update README.md for user-facing features. Add CHANGELOG.md entry.
 4. **Open PR** with a clear description of what changed and why.
 5. **CI must pass.** Formatting, clippy pedantic, and the full test suite.
