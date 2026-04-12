@@ -113,11 +113,11 @@ jobs:
       - name: Create checksums
         run: |
           cd release
-          sha256sum * > SHA256SUMS.txt
+          sha256sum -- * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2.6.2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           name: MCP Gateway ${{ github.event.inputs.tag || github.ref_name }}
