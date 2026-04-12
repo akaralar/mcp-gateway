@@ -39,3 +39,6 @@ config.yaml
 docs/plans/
 linkedin-post-draft.md
 .gitnexus
+AGENTS.md
+gateway.yaml
+target_quality_check/
