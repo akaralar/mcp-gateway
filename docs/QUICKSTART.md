@@ -198,7 +198,7 @@ See [examples/claude-desktop.json](../examples/claude-desktop.json) for a full e
 ## Next Steps
 
 - **Add more capabilities**: Copy any YAML from the `capabilities/` directory that ships with the gateway. 25+ work with zero config.
-- **Add MCP server backends**: Point `backends:` at existing MCP servers (stdio, HTTP, or SSE).
+- **Add MCP server backends**: Point `backends:` at existing MCP servers (stdio, HTTP, or SSE). For a zero-auth remote backend you can try in seconds, see [Adding remote MCP backends](REMOTE_BACKENDS.md) — it walks through wiring [GitMCP](https://gitmcp.io) as a universal GitHub docs + code search tool.
 - **Enable caching**: Add `cache: { enabled: true, default_ttl: 60s }` to your config.
 - **Enable auth**: Add `auth: { enabled: true, bearer_token: "auto" }` for token-based access control.
 - **Install from registry**: Run `mcp-gateway cap search finance` and `mcp-gateway cap install stock_quote`.

@@ -1,0 +1,129 @@
+# Adding Remote MCP Backends
+
+Remote MCP servers — anything reachable over HTTP or SSE — plug into
+mcp-gateway the same way local `stdio` servers do: one entry under `backends:`
+in your `gateway.yaml`. No new code, no capability YAML, no proxy glue.
+
+This guide uses [GitMCP](https://gitmcp.io) as a worked example because it is
+free, requires no auth, and instantly gives your AI a searchable view of any
+public GitHub repository.
+
+## The 30-second recipe
+
+Add this to your `gateway.yaml`:
+
+```yaml
+backends:
+  gitmcp_docs:
+    http_url: "https://gitmcp.io/docs/sse"
+    description: "GitMCP — on-demand docs + code search for any GitHub repo"
+    timeout: 30s
+```
+
+Restart (or hot-reload) the gateway. That's it. Your AI can now call GitMCP's
+tools through `gateway_search_tools` / `gateway_invoke`.
+
+## How the gateway picks the transport
+
+The gateway infers transport from the shape of the backend entry:
+
+| Entry field | Transport | When to use |
+|---|---|---|
+| `command:` | stdio | Subprocess you spawn locally |
+| `http_url:` ending in `/sse` | SSE | Server-Sent Events handshake |
+| `http_url:` with `streamable_http: true` | Streamable HTTP | Direct POST, no SSE |
+| `http_url:` (other) | Plain HTTP | Legacy HTTP MCP servers |
+
+See [`src/config/mod.rs`](../src/config/mod.rs) `TransportConfig` for the exact
+rules. GitMCP supports SSE, so the `/sse` suffix is the right choice — you get
+streaming notifications and long-lived sessions for free.
+
+## Dynamic vs. repo-pinned routes
+
+GitMCP exposes two URL shapes:
+
+1. **Dynamic dispatcher**: `https://gitmcp.io/docs/sse`
+   - One backend covers every public GitHub repo.
+   - Tools take a repo URL as an argument:
+     `fetch_generic_url_content`, `search_generic_code`,
+     `search_generic_documentation`.
+   - Best when you browse many repos.
+
+2. **Repo-pinned route**: `https://gitmcp.io/{owner}/{repo}/sse`
+   - Scoped to one repository.
+   - Tools are named after the repo, e.g.
+     `fetch_mcp_gateway_documentation`, `search_mcp_gateway_code`.
+   - Best when the gateway backs one project and you want clean tool names.
+
+Both variants are just different `http_url` values. You can even define both in
+the same config:
+
+```yaml
+backends:
+  gitmcp_docs:
+    http_url: "https://gitmcp.io/docs/sse"
+    description: "GitMCP — any GitHub repo (dynamic)"
+
+  gitmcp_self:
+    http_url: "https://gitmcp.io/MikkoParkkola/mcp-gateway/sse"
+    description: "GitMCP — pinned to mcp-gateway"
+```
+
+## Calling the tools through the gateway
+
+Once a backend is registered, the usual Meta-MCP flow applies:
+
+```jsonc
+// 1. Find the tool
+{
+  "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+  "params": {
+    "name": "gateway_search_tools",
+    "arguments": { "query": "github documentation" }
+  }
+}
+
+// 2. Invoke it
+{
+  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+  "params": {
+    "name": "gateway_invoke",
+    "arguments": {
+      "server": "gitmcp_docs",
+      "tool": "fetch_generic_url_content",
+      "arguments": {
+        "url": "https://github.com/MikkoParkkola/mcp-gateway"
+      }
+    }
+  }
+}
+```
+
+No token cost for loading GitMCP's schemas into the model: the gateway's
+Meta-MCP surface keeps discovery compact and the AI only pays for the tool it
+actually calls.
+
+## Authenticated remote backends
+
+For remote servers that need auth, add headers or OAuth:
+
+```yaml
+backends:
+  my_saas:
+    http_url: "https://mcp.example.com/sse"
+    headers:
+      Authorization: "Bearer ${MY_SAAS_TOKEN}"
+
+  my_google:
+    http_url: "https://mcp.googleapis.com/mcp"
+    streamable_http: true
+    oauth:
+      enabled: true
+      scopes:
+        - "https://www.googleapis.com/auth/drive.readonly"
+      client_id: "env:GOOGLE_CLIENT_ID"
+```
+
+See [`examples/gateway-full.yaml`](../examples/gateway-full.yaml) for the full
+set of backend fields, including timeouts, idle hibernation, secret injection,
+and `passthrough` mode.

@@ -56,6 +56,27 @@ The base discovery quartet (`gateway_list_servers`, `gateway_list_tools`, `gatew
 | **Kong / Portkey** | General API gateways | Not MCP-aware. No meta-tool discovery, no tool search, no capability YAML system. |
 | **Building fewer MCP servers** | Reduce tool count manually | You lose capabilities. Gateway lets you keep everything and pay the token cost of the compact Meta-MCP surface. |
 
+## Security
+
+Connecting N MCP servers to an agent means accepting N attack surfaces. Tool poisoning, rug pulls, and exfiltration via hidden instructions in tool descriptions are demonstrated attacks, not hypotheticals. Invariant Labs' writeup ([MCP Security Notification: Tool Poisoning Attacks](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)) and Simon Willison's summary ([MCP has prompt injection security problems](https://simonwillison.net/2025/Apr/9/mcp-prompt-injection/)) lay out the threat model.
+
+mcp-gateway puts every backend tool description behind one audit surface and defends it structurally:
+
+- **Tool-poisoning validator (AX-010).** Every backend tool description is scanned before it reaches the agent's context window. HIGH patterns fail-closed: `<IMPORTANT>` blocks, `~/.ssh`/`~/.aws`/`id_rsa`/`.env`/`/etc/passwd`, `sidenote` exfiltration language, `curl .* https?://`, `base64` in exfil context. MEDIUM patterns warn: 40+ consecutive spaces, zero-width / bidi-override Unicode, oversized descriptions. Implementation: [`src/validator/rules/tool_poisoning.rs`](src/validator/rules/tool_poisoning.rs) (19 tests).
+- **SHA-256 capability hash-pinning.** `mcp-gateway cap pin <file>` writes a `sha256:` line over the file's canonical hash (`grep -v '^sha256:' capability.yaml | sha256sum` is reproducible from any shell). The loader refuses any mismatched file on load and on every watcher event.
+- **Rug-pull detection.** When a pinned capability's on-disk content changes after approval, the watcher unloads it and logs `RUG-PULL DETECTED`. The capability stays quarantined until an operator re-pins. Implementation: [`src/capability/hash.rs`](src/capability/hash.rs) and `detect_rug_pulls` in [`src/capability/backend.rs`](src/capability/backend.rs).
+- **Centralized audit surface.** Capability YAMLs are plain text, diffable, grep-able, PR-reviewable. The agent only ever sees 4 meta-tools plus a small fixed set of operator helpers. No N-server tool-list pollution means no N-server attack surface.
+
+Full walkthrough, PoC snippets, and roadmap: [docs/blog/security-aware-mcp-gateway.md](docs/blog/security-aware-mcp-gateway.md).
+
+### Recent additions
+
+- **OpenAPI importer.** `mcp-gateway cap import <spec-url-or-file>` turns an OpenAPI 3 spec into one validated capability YAML per operation. The full Swagger Petstore spec becomes 19 validated capability YAMLs end-to-end:
+  ```bash
+  mcp-gateway cap import https://petstore3.swagger.io/api/v3/openapi.json --output capabilities/ --prefix petstore
+  ```
+  22 tests across [`src/capability/openapi.rs`](src/capability/openapi.rs) and [`tests/openapi_import_tests.rs`](tests/openapi_import_tests.rs).
+
 ## Quick Start
 
 ### Install
@@ -249,7 +270,12 @@ Any MCP-compliant server works. All three transport types supported:
 |-----------|---------|
 | **stdio** | `@anthropic/mcp-server-tavily`, `@modelcontextprotocol/server-filesystem`, `@modelcontextprotocol/server-github` |
 | **HTTP** | Any Streamable HTTP server |
-| **SSE** | Pieces, LangChain, etc. |
+| **SSE** | Pieces, LangChain, [GitMCP](https://gitmcp.io) (free remote docs+code search for any GitHub repo) |
+
+Remote MCP servers plug in by URL — no extra code. See
+[examples/gateway-full.yaml](examples/gateway-full.yaml) for a commented GitMCP
+backend entry and [docs/REMOTE_BACKENDS.md](docs/REMOTE_BACKENDS.md) for a
+step-by-step walkthrough.
 
 ## API
 
