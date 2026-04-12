@@ -53,6 +53,17 @@ jobs:
       - name: Validate public claim consistency
         run: cargo test --test public_claims_validation
 
+  secrets-scan:
+    name: Secrets scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified
+
   docker:
     name: Docker
     runs-on: ubuntu-latest
