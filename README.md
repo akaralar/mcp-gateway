@@ -18,6 +18,11 @@
 
 ![demo](demo.gif)
 
+### Independent Reviews
+
+- [Five MCP hot-reload tools compared](https://ruachtov.ai/blog/five-tools-mcp-restart.html) -- Ruach Tov Collective's BPD-based comparison of mcp-gateway against four restart-focused alternatives. Includes a feature matrix and architectural analysis.
+- [mcp-gateway deep dive](https://ruachtov.ai/blog/mcp-gateway-deep-dive.html) -- Detailed walkthrough of the capability system, SHA-256 integrity pinning, and the v2.5-to-v2.9 development arc.
+
 MCP Gateway sits between your AI client and your tools. Instead of loading hundreds of tool definitions into every request, the AI gets a compact Meta-MCP surface -- 13 tools minimum, 15 in the README benchmark scenario, 16 when webhook status is surfaced -- and discovers the right backend tool on demand.
 
 Public quantitative claims in this README are sourced from [docs/BENCHMARKS.md](docs/BENCHMARKS.md) and the machine-readable [benchmarks/public_claims.json](benchmarks/public_claims.json), with CI checks to catch drift.
@@ -412,11 +417,6 @@ Reference: [Anthropic SKILL.md spec](https://docs.claude.com/en/docs/claude-code
 | [Community Registry](docs/COMMUNITY_REGISTRY.md) | Share and install capabilities |
 | [Benchmarks](docs/BENCHMARKS.md) | Performance measurements |
 | [Changelog](CHANGELOG.md) | Release history |
-
-### Independent Reviews
-
-- [Five MCP hot-reload tools compared](https://ruachtov.ai/blog/five-tools-mcp-restart.html) -- Ruach Tov Collective's BPD-based comparison of mcp-gateway against four restart-focused alternatives. Includes a feature matrix and architectural analysis.
-- [mcp-gateway deep dive](https://ruachtov.ai/blog/mcp-gateway-deep-dive.html) -- Detailed walkthrough of the capability system, SHA-256 integrity pinning, and the v2.5-to-v2.9 development arc.
 
 ## Troubleshooting
 
