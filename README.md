@@ -86,7 +86,13 @@ Full walkthrough, PoC snippets, and roadmap: [docs/blog/security-aware-mcp-gatew
 
 ## Quick Start
 
-**60 seconds, zero hand-written YAML, zero API keys to start.** The wizard scans your existing AI clients (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, Continue.dev, Codex) plus running MCP processes, imports every server it finds into one `gateway.yaml`, and writes the gateway entry back into each client so they all route through one place.
+**Tell your AI assistant** (recommended):
+
+> Read https://github.com/MikkoParkkola/mcp-gateway and install mcp-gateway to consolidate all my MCP servers behind one gateway
+
+Your agent will install the binary, run the setup wizard, import your existing MCP servers, and wire itself up. Works in Claude Code, Cursor, Windsurf, Codex, and any AI with terminal access.
+
+**Or four commands:**
 
 ```bash
 brew install MikkoParkkola/tap/mcp-gateway   # 1. install
@@ -223,7 +229,7 @@ Modes: `--mode proxy` (HTTP), `--mode stdio` (subprocess), `--mode auto` (probe 
 
 ### 1. Unlimited Tools, Minimal Tokens
 
-The gateway exposes 12 Meta-MCP tools minimum, 14 in the README benchmark scenario, and 15 when webhook status is surfaced. The base discovery quartet stays fixed; the rest are operator helpers for stats, cost, playbooks, profile control, disabled-capability visibility, reload, and webhook status.
+The gateway exposes 13 Meta-MCP tools minimum, 15 in the README benchmark scenario, and 16 when webhook status is surfaced. The base discovery quartet stays fixed; the rest are operator helpers for stats, cost, playbooks, profile control, disabled-capability visibility, reload, and webhook status.
 
 **Token math** (Claude Opus @ $15/M input tokens, reproducible via `python benchmarks/token_savings.py --scenario readme`):
 - **Without**: 100 tools x 150 tokens x 1,000 requests = 15M tokens = **$225**
@@ -253,7 +259,7 @@ Circuit breakers, retry with backoff, rate limiting, health checks, graceful shu
 ┌───────────────────────────────────────────────────────────────┐
 │                    MCP Gateway (:39400)                        │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │  Meta-MCP: 12-15 Tools + Surfaced Tools                 │  │
+│  │  Meta-MCP: 13-16 Tools + Surfaced Tools                 │  │
 │  │  • gateway_list_servers    • gateway_search_tools       │  │
 │  │  • gateway_list_tools      • gateway_invoke             │  │
 │  └─────────────────────────────────────────────────────────┘  │
@@ -440,7 +446,7 @@ mcp-gateway is part of a suite of MCP tools:
 
 | Tool | Description |
 |------|-------------|
-| **[mcp-gateway](https://github.com/MikkoParkkola/mcp-gateway)** | **Universal MCP gateway — compact 12-15 tool surface replaces 100+ registrations** |
+| **[mcp-gateway](https://github.com/MikkoParkkola/mcp-gateway)** | **Universal MCP gateway — compact 13-16 tool surface replaces 100+ registrations** |
 | [trvl](https://github.com/MikkoParkkola/trvl) | AI travel agent — 36 MCP tools for flights, hotels, ground transport |
 | [nab](https://github.com/MikkoParkkola/nab) | Web content extraction — fetch any URL with cookies + anti-bot bypass |
 | [axterminator](https://github.com/MikkoParkkola/axterminator) | macOS GUI automation — 34 MCP tools via Accessibility API |
