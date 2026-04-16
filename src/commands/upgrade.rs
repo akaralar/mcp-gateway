@@ -136,6 +136,48 @@ fn backup_config(config_dir: &Path, old_version: &str) -> std::io::Result<Option
     Ok(Some(dst))
 }
 
+// ── What's new ────────────────────────────────────────────────────────────────
+
+/// A "what's new" entry shown when upgrading past a given version.
+struct WhatsNew {
+    /// Version that introduced these changes.
+    version: &'static str,
+    /// Bullet points shown to the user.
+    items: &'static [&'static str],
+}
+
+/// Registry of user-visible changes, sorted ascending by version.
+///
+/// Add entries here when a release ships noteworthy features.
+static WHATS_NEW: &[WhatsNew] = &[WhatsNew {
+    version: "2.9.1",
+    items: &[
+        "OWASP Agentic AI Top 10: 8/10 covered (destructive confirmation, message signing, anomaly blocking)",
+        "New `upgrade` command with version stamp and migration framework",
+        "New `gateway_reload_capabilities` agent-callable meta-tool",
+    ],
+}];
+
+/// Print "What's new" items for all versions strictly after `from` and up to `current`.
+///
+/// Skipped on fresh install (nobody needs a changelog on first run).
+fn print_whats_new(from: SemVer, current: SemVer) {
+    let items: Vec<&str> = WHATS_NEW
+        .iter()
+        .filter(|w| SemVer::parse(w.version).is_some_and(|v| v > from && v <= current))
+        .flat_map(|w| w.items.iter().copied())
+        .collect();
+
+    if items.is_empty() {
+        return;
+    }
+
+    println!("What's new in v{current}:");
+    for item in &items {
+        println!("  - {item}");
+    }
+}
+
 // ── Migration engine ──────────────────────────────────────────────────────────
 
 /// Context for a single upgrade run.
@@ -158,12 +200,12 @@ impl UpgradeContext<'_> {
     }
 
     fn run(&self) -> std::io::Result<usize> {
+        if !self.quiet {
+            print_whats_new(self.old_ver, self.new_ver);
+        }
+
         let migrations = self.applicable_migrations();
         let count = migrations.len();
-
-        if count == 0 && !self.quiet {
-            println!("No migrations to apply.");
-        }
 
         if !self.dry_run && count > 0 {
             backup_config(self.data_dir, &self.old_ver.to_string())?;
@@ -338,18 +380,12 @@ pub fn run_upgrade_command(dry_run: bool, quiet: bool, config_dir: Option<&Path>
     }
 }
 
-fn print_upgrade_summary(old: SemVer, new: SemVer, migrations: usize, dry_run: bool, quiet: bool) {
+fn print_upgrade_summary(old: SemVer, new: SemVer, _migrations: usize, dry_run: bool, quiet: bool) {
     if quiet {
         return;
     }
     let prefix = if dry_run { "[dry-run] " } else { "" };
-    println!();
-    println!(
-        "{prefix}Upgraded from {old} to {new}. \
-         {migrations} migration{} applied.",
-        if migrations == 1 { "" } else { "s" }
-    );
-    println!("Run `mcp-gateway doctor` to verify.");
+    println!("{prefix}mcp-gateway upgraded v{old} \u{2192} v{new}");
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -617,5 +653,104 @@ mod tests {
         // WHEN: applicable migrations are collected
         // THEN: none (registry is empty)
         assert_eq!(ctx.applicable_migrations().len(), 0);
+    }
+
+    // ── what's new ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn whats_new_registry_has_entries_for_current_version() {
+        // GIVEN: the WHATS_NEW registry
+        // WHEN: we look for entries at 2.9.1
+        let v291 = SemVer::parse("2.9.1").unwrap();
+        let has_entries = WHATS_NEW
+            .iter()
+            .any(|w| SemVer::parse(w.version) == Some(v291));
+        // THEN: at least one entry exists
+        assert!(has_entries, "WHATS_NEW should have entries for v2.9.1");
+    }
+
+    #[test]
+    fn whats_new_items_shown_when_upgrading_past_version() {
+        // GIVEN: upgrading from 2.8.0 to 2.9.1
+        let from = SemVer::parse("2.8.0").unwrap();
+        let to = SemVer::parse("2.9.1").unwrap();
+        // WHEN: collecting what's-new items
+        let items: Vec<&str> = WHATS_NEW
+            .iter()
+            .filter(|w| SemVer::parse(w.version).is_some_and(|v| v > from && v <= to))
+            .flat_map(|w| w.items.iter().copied())
+            .collect();
+        // THEN: items are not empty (v2.9.1 entries should match)
+        assert!(
+            !items.is_empty(),
+            "Should have what's-new items for 2.8.0 -> 2.9.1"
+        );
+    }
+
+    #[test]
+    fn whats_new_items_not_shown_for_same_version() {
+        // GIVEN: no version change (already at 2.9.1)
+        let from = SemVer::parse("2.9.1").unwrap();
+        let to = SemVer::parse("2.9.1").unwrap();
+        // WHEN: collecting what's-new items
+        let items: Vec<&str> = WHATS_NEW
+            .iter()
+            .filter(|w| SemVer::parse(w.version).is_some_and(|v| v > from && v <= to))
+            .flat_map(|w| w.items.iter().copied())
+            .collect();
+        // THEN: no items (version > from is false when from == to)
+        assert!(items.is_empty());
+    }
+
+    // ── backup during migration ──────────────────────────────────────────────
+
+    #[test]
+    fn backup_called_when_migrations_apply() {
+        // GIVEN: a data dir with gateway.yaml and an UpgradeContext that has a
+        // migration (we simulate by directly calling backup_config, since the
+        // static MIGRATIONS slice cannot be mutated in tests)
+        let dir = TempDir::new().unwrap();
+        let yaml = dir.path().join("gateway.yaml");
+        let config_content = "server:\n  port: 39400\n  host: 0.0.0.0\n";
+        std::fs::write(&yaml, config_content).unwrap();
+
+        // WHEN: backup_config is called as the migration engine would
+        let bak = backup_config(dir.path(), "2.8.0").unwrap();
+
+        // THEN: backup file exists and preserves content
+        let bak_path = bak.expect("backup should be created when gateway.yaml exists");
+        assert_eq!(bak_path.file_name().unwrap(), "gateway.yaml.bak.2.8.0");
+        let backed_up = std::fs::read_to_string(&bak_path).unwrap();
+        assert_eq!(backed_up, config_content);
+        // Original is untouched
+        let original = std::fs::read_to_string(&yaml).unwrap();
+        assert_eq!(original, config_content);
+    }
+
+    #[test]
+    fn no_backup_when_zero_migrations() {
+        // GIVEN: a data dir with gateway.yaml but no applicable migrations
+        let dir = TempDir::new().unwrap();
+        let yaml = dir.path().join("gateway.yaml");
+        std::fs::write(&yaml, "server:\n  port: 39400\n").unwrap();
+        write_stamp(&stamp_path(dir.path()), "0.1.0").unwrap();
+
+        // WHEN: upgrade runs (no migrations in the registry)
+        let ctx = UpgradeContext {
+            data_dir: dir.path(),
+            old_ver: SemVer::parse("0.1.0").unwrap(),
+            new_ver: SemVer::parse("2.9.1").unwrap(),
+            dry_run: false,
+            quiet: true,
+        };
+        let n = ctx.run().unwrap();
+
+        // THEN: no migrations applied, no backup file created
+        assert_eq!(n, 0);
+        let bak = dir.path().join("gateway.yaml.bak.0.1.0");
+        assert!(
+            !bak.exists(),
+            "backup should NOT be created when 0 migrations apply"
+        );
     }
 }
