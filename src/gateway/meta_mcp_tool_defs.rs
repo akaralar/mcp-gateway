@@ -518,7 +518,38 @@ pub(crate) fn build_meta_tools(
     if reload_enabled {
         tools.push(build_reload_config_tool());
     }
+    tools.push(build_reload_capabilities_tool());
     tools
+}
+
+/// Build the `gateway_reload_capabilities` meta-tool definition.
+///
+/// Re-reads every YAML capability file in every configured capability directory
+/// without restarting the gateway. Returns the new total count plus per-directory
+/// added / removed / changed lists. Pairs with `gateway_reload_config` (which
+/// reloads `config.yaml` and backend definitions) but addresses the more common
+/// hot path: an agent has just authored or edited a capability YAML and wants
+/// it visible without disconnecting.
+pub(crate) fn build_reload_capabilities_tool() -> Tool {
+    Tool {
+        name: "gateway_reload_capabilities".to_string(),
+        title: Some("Reload Capabilities".to_string()),
+        description: Some(
+            "Re-read all YAML capability files from disk and rebuild the capability \
+             backend's tool surface. Returns the new total. Useful when an agent has \
+             just written a new capability YAML and wants it usable without restarting \
+             the gateway. Clients should re-list capability tools to see additions; \
+             `tools/list_changed` notification is a follow-up."
+                .to_string(),
+        ),
+        input_schema: json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        }),
+        output_schema: None,
+        annotations: Some(write_idempotent_annotations()),
+    }
 }
 
 // ============================================================================

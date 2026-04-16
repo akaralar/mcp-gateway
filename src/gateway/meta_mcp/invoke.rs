@@ -772,6 +772,35 @@ impl MetaMcp {
         }
     }
 
+    /// `gateway_reload_capabilities` — re-read every YAML capability file from disk.
+    ///
+    /// Designed for the agent-self-development hot path: an agent has just
+    /// authored or edited a capability YAML and wants it immediately callable
+    /// without restarting the gateway. Mirrors the file-watcher hot-reload that
+    /// already triggers on disk changes, but exposes it as an MCP tool the
+    /// agent can call directly.
+    pub(super) async fn reload_capabilities(&self) -> Result<Value> {
+        let backend = {
+            let guard = self.capabilities.read();
+            guard.clone()
+        };
+        let backend = backend.ok_or_else(|| {
+            Error::json_rpc(
+                -32603,
+                "Capability backend is not enabled on this gateway",
+            )
+        })?;
+
+        match backend.reload().await {
+            Ok(total) => Ok(json!({
+                "status": "ok",
+                "backend": backend.name,
+                "total_capabilities": total,
+            })),
+            Err(e) => Err(Error::json_rpc(-32603, format!("{e}"))),
+        }
+    }
+
     /// `gateway_webhook_status` — webhook endpoint status and delivery stats.
     #[allow(clippy::unnecessary_wraps)]
     pub(super) fn webhook_status(&self) -> Result<Value> {

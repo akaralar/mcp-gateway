@@ -645,6 +645,7 @@ impl MetaMcp {
             "gateway_list_profiles" => self.list_profiles(),
             "gateway_set_state" => self.set_state(&arguments, session_id),
             "gateway_reload_config" => self.reload_config().await,
+            "gateway_reload_capabilities" => self.reload_capabilities().await,
             _ => {
                 const META_TOOLS: &[&str] = &[
                     "gateway_search",
@@ -665,6 +666,7 @@ impl MetaMcp {
                     "gateway_list_profiles",
                     "gateway_set_state",
                     "gateway_reload_config",
+                    "gateway_reload_capabilities",
                 ];
                 let suggestion = did_you_mean(tool_name, META_TOOLS, 3, 3);
                 let msg = match suggestion {

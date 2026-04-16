@@ -49,6 +49,7 @@ impl MetaMcp {
             "gateway_list_profiles",
             "gateway_set_state",
             "gateway_reload_config",
+            "gateway_reload_capabilities",
         ];
 
         let mut map: HashMap<String, String> = HashMap::new();
