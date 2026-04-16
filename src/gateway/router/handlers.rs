@@ -430,16 +430,25 @@ pub(super) async fn meta_mcp_handler(
                         );
                     }
                     if !verdict.allowed {
-                        let reason = verdict
-                            .findings
-                            .first()
-                            .map_or("Security firewall blocked this request", |f| {
-                                f.description.as_str()
-                            });
+                        // OWASP ASI10 (Rogue Agents): anomaly blocks use -32002;
+                        // all other firewall blocks use -32600 (invalid request).
+                        let (code, reason) = if verdict.is_anomaly_block() {
+                            let desc = verdict.findings.first().map_or(
+                                "Anomaly detection triggered: unusual tool sequence blocked",
+                                |f| f.description.as_str(),
+                            );
+                            (-32002_i32, format!("Anomaly detection blocked: {desc}"))
+                        } else {
+                            let desc = verdict.findings.first().map_or(
+                                "Security firewall blocked this request",
+                                |f| f.description.as_str(),
+                            );
+                            (-32600_i32, format!("Firewall blocked: {desc}"))
+                        };
                         return build_error_response(
                             Some(id),
-                            -32600,
-                            format!("Firewall blocked: {reason}"),
+                            code,
+                            reason,
                             &session_id,
                             StatusCode::BAD_REQUEST,
                         );

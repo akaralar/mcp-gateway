@@ -56,9 +56,28 @@ pub struct FirewallConfig {
     /// Per-tool/per-pattern policy overrides (first match wins).
     #[serde(default)]
     pub rules: Vec<FirewallRule>,
-    /// Minimum anomaly score (0.0–1.0) to emit a warning.
+    /// Minimum anomaly score (0.0–1.0) to emit a log warning.
+    ///
+    /// Maps to OWASP ASI10 "log threshold" — scores at or above this value
+    /// produce a `SequenceAnomaly` finding at `Severity::Low` (audit only).
     #[serde(default = "default_anomaly_threshold")]
     pub anomaly_threshold: f64,
+    /// Score at or above which the request is **blocked** (OWASP ASI10 blocking).
+    ///
+    /// When `None` (the default), anomaly detection remains retrospective:
+    /// it logs warnings but never rejects requests, preserving backward
+    /// compatibility. Set to a value in `(anomaly_threshold, 1.0]` to enable
+    /// prospective blocking — e.g. `0.9`.
+    ///
+    /// ```yaml
+    /// security:
+    ///   firewall:
+    ///     anomaly_detection: true
+    ///     anomaly_threshold: 0.7       # log threshold
+    ///     anomaly_block_threshold: 0.9 # block threshold
+    /// ```
+    #[serde(default)]
+    pub anomaly_block_threshold: Option<f64>,
 }
 
 fn default_anomaly_threshold() -> f64 {
@@ -77,6 +96,7 @@ impl Default for FirewallConfig {
             audit_log: None,
             rules: Vec::new(),
             anomaly_threshold: default_anomaly_threshold(),
+            anomaly_block_threshold: None, // opt-in: None = log-only (backward compat)
         }
     }
 }
@@ -284,16 +304,41 @@ impl Firewall {
             .as_ref()
             .map(|a| a.score_transition(session_id, server, tool));
 
-        if let Some(score) = anomaly_score
-            && score >= self.config.anomaly_threshold
-        {
-            findings.push(Finding {
-                scan_type: ScanType::SequenceAnomaly,
-                severity: Severity::Low,
-                description: format!("Unusual tool sequence (anomaly score: {score:.2})"),
-                matched: format!("{server}:{tool}"),
-                location: FindingLocation::SequenceAnomaly,
-            });
+        if let Some(score) = anomaly_score {
+            let above_block = self
+                .config
+                .anomaly_block_threshold
+                .is_some_and(|t| score >= t);
+            let above_log = score >= self.config.anomaly_threshold;
+
+            if above_block {
+                tracing::warn!(
+                    session_id = session_id,
+                    server = server,
+                    tool = tool,
+                    anomaly_score = score,
+                    "OWASP ASI10: rogue-agent anomaly blocked (score {score:.2})"
+                );
+                findings.push(Finding {
+                    scan_type: ScanType::SequenceAnomaly,
+                    severity: Severity::High,
+                    description: format!(
+                        "Anomaly detection triggered: unusual tool sequence blocked \
+                         (score {score:.2} ≥ block_threshold {:.2})",
+                        self.config.anomaly_block_threshold.unwrap_or(1.0),
+                    ),
+                    matched: format!("{server}:{tool}"),
+                    location: FindingLocation::SequenceAnomaly,
+                });
+            } else if above_log {
+                findings.push(Finding {
+                    scan_type: ScanType::SequenceAnomaly,
+                    severity: Severity::Low,
+                    description: format!("Unusual tool sequence (anomaly score: {score:.2})"),
+                    matched: format!("{server}:{tool}"),
+                    location: FindingLocation::SequenceAnomaly,
+                });
+            }
         }
 
         // 3. Determine action from rules + finding severity.
@@ -407,6 +452,20 @@ impl FirewallVerdict {
             findings: Vec::new(),
             anomaly_score: None,
         }
+    }
+
+    /// Returns `true` when the block was triggered solely by anomaly detection
+    /// (OWASP ASI10 — Rogue Agents), i.e. every blocking finding is a
+    /// `SequenceAnomaly` at `Severity::High`.
+    ///
+    /// Callers should use JSON-RPC error code `-32002` for anomaly blocks to
+    /// distinguish them from generic security blocks (`-32600`).
+    pub fn is_anomaly_block(&self) -> bool {
+        !self.allowed
+            && !self.findings.is_empty()
+            && self.findings.iter().all(|f| {
+                f.scan_type == ScanType::SequenceAnomaly && f.severity == Severity::High
+            })
     }
 }
 
@@ -757,5 +816,127 @@ mod tests {
     fn session_end_is_noop_without_anomaly_detector() {
         let fw = default_firewall();
         fw.on_session_end("session-xyz"); // must not panic
+    }
+
+    // ── OWASP ASI10 anomaly blocking ──────────────────────────────────────────
+
+    /// Build a firewall with anomaly detection enabled and trained transition
+    /// data so that a never-seen transition scores 0.95.
+    fn anomaly_firewall(log_threshold: f64, block_threshold: Option<f64>) -> Firewall {
+        use crate::transition::TransitionTracker;
+        let tracker = Arc::new(TransitionTracker::new());
+        // Train: tool_a → tool_b (10×) so predecessor data exists.
+        for _ in 0..10 {
+            tracker.record_transition("train", "srv:tool_a");
+            tracker.record_transition("train", "srv:tool_b");
+        }
+        let cfg = FirewallConfig {
+            anomaly_detection: true,
+            anomaly_threshold: log_threshold,
+            anomaly_block_threshold: block_threshold,
+            ..FirewallConfig::default()
+        };
+        Firewall::from_config(cfg, Some(tracker))
+    }
+
+    /// Prime the session so `tool_a` is recorded as the last tool.
+    fn prime_session(fw: &Firewall, session: &str) {
+        fw.check_request(session, "srv", "tool_a", &json!({}), "caller");
+    }
+
+    #[test]
+    fn anomaly_below_log_threshold_passes_silently() {
+        // Cold-start score is 0.5; log_threshold is 0.7 → no finding at all.
+        let fw = anomaly_firewall(0.7, None);
+        let args = json!({});
+        // First call is always cold-start (score 0.5).
+        let verdict = fw.check_request("sess", "srv", "tool_a", &args, "caller");
+        assert!(verdict.allowed);
+        assert!(
+            verdict.findings.is_empty(),
+            "Cold-start score 0.5 must not produce a finding below log_threshold 0.7"
+        );
+    }
+
+    #[test]
+    fn anomaly_above_log_threshold_logs_but_passes() {
+        // Never-seen transition scores 0.95; log_threshold=0.7, no block_threshold.
+        let fw = anomaly_firewall(0.7, None);
+        prime_session(&fw, "sess");
+        let verdict = fw.check_request("sess", "srv", "never_seen_tool", &json!({}), "caller");
+        assert!(
+            verdict.allowed,
+            "Without block_threshold, anomaly findings must not block"
+        );
+        assert!(
+            verdict
+                .findings
+                .iter()
+                .any(|f| f.scan_type == ScanType::SequenceAnomaly
+                    && f.severity == Severity::Low),
+            "Score 0.95 above log_threshold 0.7 must produce a Low SequenceAnomaly finding"
+        );
+        assert!(
+            !verdict.is_anomaly_block(),
+            "is_anomaly_block must be false when block_threshold is not set"
+        );
+    }
+
+    #[test]
+    fn anomaly_above_block_threshold_is_rejected() {
+        // Never-seen transition scores 0.95; block_threshold=0.9 → block.
+        let fw = anomaly_firewall(0.7, Some(0.9));
+        prime_session(&fw, "sess");
+        let verdict = fw.check_request("sess", "srv", "never_seen_tool", &json!({}), "caller");
+        assert!(
+            !verdict.allowed,
+            "Score 0.95 ≥ block_threshold 0.9 must be rejected"
+        );
+        assert_eq!(verdict.action, FirewallAction::Block);
+        assert!(
+            verdict
+                .findings
+                .iter()
+                .any(|f| f.scan_type == ScanType::SequenceAnomaly
+                    && f.severity == Severity::High),
+            "Blocked anomaly finding must be Severity::High"
+        );
+        assert!(
+            verdict.is_anomaly_block(),
+            "is_anomaly_block must be true when only anomaly findings are present"
+        );
+    }
+
+    #[test]
+    fn anomaly_block_threshold_unset_preserves_backward_compatibility() {
+        // block_threshold=None: even a score of 0.95 must never block.
+        let fw = anomaly_firewall(0.7, None);
+        prime_session(&fw, "sess");
+        let verdict = fw.check_request("sess", "srv", "never_seen_tool", &json!({}), "caller");
+        assert!(
+            verdict.allowed,
+            "With no block_threshold, all requests pass regardless of anomaly score"
+        );
+    }
+
+    #[test]
+    fn anomaly_finding_is_high_severity_only_when_above_block_threshold() {
+        // Score 0.95 is above log (0.7) but below block (0.99) → Low, not High.
+        let fw = anomaly_firewall(0.7, Some(0.99));
+        prime_session(&fw, "sess");
+        let verdict = fw.check_request("sess", "srv", "never_seen_tool", &json!({}), "caller");
+        assert!(verdict.allowed, "Score 0.95 < block_threshold 0.99 must pass");
+        assert!(
+            verdict
+                .findings
+                .iter()
+                .any(|f| f.scan_type == ScanType::SequenceAnomaly
+                    && f.severity == Severity::Low),
+            "Finding must be Low (log-only) when score is below block_threshold"
+        );
+        assert!(
+            !verdict.is_anomaly_block(),
+            "is_anomaly_block must be false when score is below block_threshold"
+        );
     }
 }
