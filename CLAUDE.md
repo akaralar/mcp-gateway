@@ -118,16 +118,18 @@ cargo fmt                            # auto-format
 
 ## Architecture
 
-Single-binary gateway: AI client -> compact Meta-MCP surface (12-15 tools) -> dynamic discovery of 500+ backend tools.
-~91% token savings by not loading all tool definitions into every request.
+Single-binary gateway: AI client -> compact Meta-MCP surface (13-16 tools) -> dynamic discovery of 500+ backend tools.
+~90% token savings by not loading all tool definitions into every request.
+OWASP Agentic AI Top 10: 10/10 covered. MCP + A2A dual-protocol.
 
 Key modules: `gateway/` (core router, OAuth, streaming, UI), `provider/` (MCP/composite/capability),
-`capability/` (discovery, validation), `transport/` (HTTP, stdio), `security/` (firewall, mTLS),
-`cost_accounting/`, `scheduler/`, `skills/`, `tool_profiles/`, `config_reload/`.
+`capability/` (discovery, validation), `transport/` (HTTP, stdio), `security/` (firewall, mTLS, message signing, agent identity, memory scanner),
+`cost_accounting/`, `scheduler/`, `skills/`, `tool_profiles/`, `config_reload/`, `a2a/` (A2A transport adapter),
+`commands/upgrade` (post-upgrade migration framework).
 
 ## Features (Cargo)
 
-`default`, `config-export`, `cost-governance`, `discovery`, `firewall`, `metrics`,
+`default`, `a2a`, `config-export`, `cost-governance`, `discovery`, `firewall`, `metrics`,
 `semantic-search`, `spec-preview`, `tool-profiles`, `webui`
 
 ## Quality Gates
