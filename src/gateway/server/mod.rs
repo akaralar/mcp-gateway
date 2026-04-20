@@ -763,12 +763,24 @@ impl Gateway {
             });
         }
 
-        // Run server — plain HTTP or mTLS depending on config
+        // Run server — plain HTTP or mTLS depending on config.
+        //
+        // On shutdown signal we first close all streaming sessions, which
+        // drops the broadcast senders and causes every SSE stream to observe
+        // `RecvError::Closed` → break → response completes.  Only then does
+        // axum's graceful-shutdown kick in, and it returns immediately because
+        // there are no more open connections.
+        let mux_for_shutdown = Arc::clone(&multiplexer);
+        let shutdown_and_cleanup = async move {
+            shutdown_signal(shutdown_tx).await;
+            mux_for_shutdown.close_all_sessions();
+        };
+
         if self.config.mtls.enabled {
-            serve_tls(app, addr, &self.config.mtls, shutdown_signal(shutdown_tx)).await?;
+            serve_tls(app, addr, &self.config.mtls, shutdown_and_cleanup).await?;
         } else {
             axum::serve(listener, app)
-                .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+                .with_graceful_shutdown(shutdown_and_cleanup)
                 .await
                 .map_err(|e| Error::Tls(e.to_string()))?;
         }
