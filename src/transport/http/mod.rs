@@ -482,8 +482,7 @@ impl HttpTransport {
     async fn send_request(&self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
         match self.send_request_inner(request).await {
             Err(Error::Transport(ref msg))
-                if msg.contains("missing valid MCP session")
-                    && request.method != "initialize" =>
+                if msg.contains("missing valid MCP session") && request.method != "initialize" =>
             {
                 warn!(url = %self.base_url, "Session expired, re-initializing connection");
                 *self.session_id.write() = None;

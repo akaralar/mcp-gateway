@@ -179,6 +179,21 @@ impl NotificationMultiplexer {
         }
     }
 
+    /// Close all sessions, causing every SSE stream to end gracefully.
+    ///
+    /// Dropping the [`ClientSession`] drops its `broadcast::Sender`, which
+    /// makes every receiver observe `RecvError::Closed` → the SSE stream
+    /// loop breaks → the HTTP response completes → axum's graceful shutdown
+    /// can finish.
+    pub fn close_all_sessions(&self) {
+        let mut sessions = self.sessions.write();
+        let count = sessions.len();
+        sessions.clear();
+        if count > 0 {
+            info!(count, "Closed all streaming sessions for shutdown");
+        }
+    }
+
     /// Check if a session exists
     pub fn has_session(&self, session_id: &str) -> bool {
         self.sessions.read().contains_key(session_id)

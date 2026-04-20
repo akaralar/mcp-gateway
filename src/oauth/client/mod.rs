@@ -428,7 +428,8 @@ impl OAuthClient {
             self.callback_port,
             self.callback_path.as_deref(),
             self.callback_host.as_deref(),
-        ).await?;
+        )
+        .await?;
         let callback_url = callback_server.callback_url.clone();
 
         // Now ensure we have a client ID, passing the actual callback URL for registration
