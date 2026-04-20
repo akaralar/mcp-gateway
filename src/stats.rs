@@ -129,7 +129,7 @@ impl UsageStats {
             .iter()
             .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
             .collect();
-        tool_counts.sort_by(|a, b| b.1.cmp(&a.1));
+        tool_counts.sort_by_key(|b| std::cmp::Reverse(b.1));
         tool_counts.truncate(10);
 
         let top_tools: Vec<TopTool> = tool_counts
@@ -160,7 +160,7 @@ impl UsageStats {
                 cached_tokens: e.value().load(Ordering::Relaxed),
             })
             .collect();
-        cached_tokens_by_server.sort_by(|a, b| b.cached_tokens.cmp(&a.cached_tokens));
+        cached_tokens_by_server.sort_by_key(|b| std::cmp::Reverse(b.cached_tokens));
 
         let total_cached_tokens = cached_tokens_by_server
             .iter()

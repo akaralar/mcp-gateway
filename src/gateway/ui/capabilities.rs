@@ -245,7 +245,7 @@ pub async fn list_capabilities(
                 continue;
             };
 
-            let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let size_bytes = entry.metadata().map_or(0, |m| m.len());
             let yaml = std::fs::read_to_string(&path).unwrap_or_default();
             let tool_count = count_tools(&yaml);
             let description = extract_description(&yaml);
