@@ -13,8 +13,9 @@ Meta-MCP approach: The discovery quartet stays fixed
 (`gateway_list_servers`, `gateway_list_tools`, `gateway_search_tools`,
 `gateway_invoke`). The canonical README benchmark adds stats, cost reporting,
 playbooks, profiles, kill/revive, disabled-capability visibility, workflow
-state control, and reload for a 15-tool surface. Surfacing webhook status
-raises that operational surface to 16 (the minimum stripped surface is 13).
+state control, config reload, and capability reload for a 16-tool surface.
+Surfacing webhook status raises that operational surface to 17 (the minimum
+stripped surface is 14).
 
 Usage:
     python benchmarks/token_savings.py
@@ -273,6 +274,10 @@ GATEWAY_TOOLS = [
     make_gateway_tool_definition(
         "gateway_reload_config",
         "Trigger an immediate config reload and report any fields that still require restart.",
+    ),
+    make_gateway_tool_definition(
+        "gateway_reload_capabilities",
+        "Re-read all YAML capability files from disk and rebuild the capability backend's tool surface. Returns the new total. Useful when an agent has just written a new capability YAML and wants it usable without restarting the gateway.",
     ),
 ]
 
