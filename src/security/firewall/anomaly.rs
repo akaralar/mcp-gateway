@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Tool sequence anomaly detection using transition probability data.
 //!
 //! Uses the existing `TransitionTracker` to score how "unusual" a tool

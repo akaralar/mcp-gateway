@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Audit logging for key server token lifecycle events.
 //!
 //! Every event is emitted via `tracing::info!` with structured fields, making

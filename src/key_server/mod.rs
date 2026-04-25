@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! LLM Key Server — OIDC identity to temporary scoped API keys.
 //!
 //! This module implements the key server pattern described in RFC-0043:

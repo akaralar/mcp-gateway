@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Per-client cost accounting for gateway tool calls.
 //!
 //! Tracks token usage and estimated spend per session and per API key,

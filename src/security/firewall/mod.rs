@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! MCP Security Firewall — unified request/response inspection layer.
 //!
 //! Composes existing security modules (`sanitize`, `response_scanner`, `policy`,

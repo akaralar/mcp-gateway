@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Tool invocation data flow tracing for security analysis — Issue #82.
 //!
 //! Maps how user-supplied arguments travel through the gateway:

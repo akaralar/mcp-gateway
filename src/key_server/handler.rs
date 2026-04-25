@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! HTTP handlers for the key server endpoints.
 //!
 //! # Endpoints

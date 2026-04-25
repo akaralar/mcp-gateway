@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Structured NDJSON audit log for every tool invocation through the firewall.
 //!
 //! Every entry is a single JSON line (NDJSON format) containing:

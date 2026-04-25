@@ -560,7 +560,30 @@ mcp-gateway is part of a suite of MCP tools:
 
 ## License
 
-MIT License -- see [LICENSE](LICENSE) for details.
+mcp-gateway is **dual-licensed** as of v2.11.0:
+
+| Scope | License | File |
+|-------|---------|------|
+| Core gateway, capabilities, transport, CLI, and everything not listed below | MIT | [LICENSE](LICENSE) |
+| Designated Enterprise Edition modules (see below) | PolyForm Noncommercial 1.0.0 | [LICENSE-EE.md](LICENSE-EE.md) |
+
+EE-designated paths (every file carries `// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0`):
+
+- `src/security/firewall/` — egress filtering
+- `src/security/agent_identity.rs` — identity-based access control (OWASP ASI03)
+- `src/security/data_flow.rs` — data flow tracking (EU AI Act Art. 12)
+- `src/security/message_signing.rs` — HMAC inter-agent signing (OWASP ASI07)
+- `src/security/policy.rs` — advanced policy enforcement
+- `src/security/response_inspect.rs`, `response_scanner.rs` — outbound credential / exfil detection
+- `src/security/scope_collision.rs` — scope conflict detection
+- `src/security/tool_integrity.rs` — tool poisoning detection (OWASP ASI04)
+- `src/cost_accounting/` — cost governance
+- `src/key_server/` — OIDC-backed scoped key issuance
+
+**What this means in practice**:
+- Free for noncommercial use, modification, redistribution.
+- Commercial use of EE modules requires a separate commercial license — contact `mikko.parkkola@iki.fi`.
+- All releases prior to v2.11.0 remain entirely MIT and stay MIT forever.
 
 ## Credits
 

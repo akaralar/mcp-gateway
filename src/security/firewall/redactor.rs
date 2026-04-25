@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Credential detection and redaction in tool response content.
 //!
 //! Scans JSON response values recursively for sensitive patterns and replaces

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Memory-poisoning detection for OWASP ASI06 (Excessive Agency via memory).
 //!
 //! Agents that persist data through memory-write tools (`remember`, `store`,

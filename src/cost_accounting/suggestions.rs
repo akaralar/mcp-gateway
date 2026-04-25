@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Cost-optimization suggestions.
 //!
 //! When a tool in a known equivalence category is invoked and a cheaper

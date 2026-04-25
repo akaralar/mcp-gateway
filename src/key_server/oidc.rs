@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! OIDC token verification — JWT signature validation and JWKS caching.
 //!
 //! # Verification flow

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Token store — persistence layer for issued temporary tokens.
 //!
 //! The [`TokenStore`] trait abstracts over storage backends. The only current

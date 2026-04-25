@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Tool definition integrity checking — anti-rug-pull defense.
 //!
 //! Upstream MCP servers may present benign `tools/list` initially, then mutate

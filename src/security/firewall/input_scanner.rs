@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Request argument scanning for injection patterns.
 //!
 //! Detects shell injection, path traversal, and SQL injection patterns in

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Scope collision detection for MCP gateway tool namespaces.
 //!
 //! When multiple upstream MCP servers register tools with identical names,

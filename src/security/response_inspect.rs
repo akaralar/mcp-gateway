@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Response content inspection for MCP backend responses.
 //!
 //! Scans backend tool call results for secrets, prompt injection, and

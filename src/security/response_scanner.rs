@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Response content scanner for prompt injection detection.
 //!
 //! Upstream MCP servers may embed malicious instructions in tool response

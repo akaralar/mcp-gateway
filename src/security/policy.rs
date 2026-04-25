@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Tool allow/deny policies for the gateway.
 //!
 //! Provides configurable per-tool access control that blocks high-risk

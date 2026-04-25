@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Pre-invoke budget enforcement.
 //!
 //! `BudgetEnforcer::check()` is called BEFORE every tool dispatch.

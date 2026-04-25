@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Access policy engine — maps OIDC identities to token scopes.
 //!
 //! # Design

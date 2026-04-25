@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Per-tool cost registry.
 //!
 //! Resolves USD-per-invocation costs from three sources (priority order):

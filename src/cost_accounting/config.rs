@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 //! Cost governance configuration types.
 //!
 //! Deserializes from `cost_governance:` section in `config.yaml`.
