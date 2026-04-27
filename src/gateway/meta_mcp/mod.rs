@@ -165,6 +165,13 @@ pub struct MetaMcp {
     /// `Some` when `security.transparency_log.enabled = true`; `None` otherwise.
     /// Zero overhead when `None` — no allocation or I/O on the hot path.
     pub(super) transparency_logger: Option<Arc<crate::security::TransparencyLogger>>,
+
+    /// Response-side anomaly screening action mode (issue #133, D2).
+    ///
+    /// When `true`, responses with HIGH/CRITICAL inspection findings are blocked
+    /// before delivery to the client.  When `false` (default), findings are
+    /// logged but the response passes through.
+    pub(super) response_inspection_action_mode: bool,
 }
 
 // ============================================================================
@@ -214,6 +221,7 @@ impl MetaMcp {
             nonce_store: None,
             require_nonce: false,
             transparency_logger: None,
+            response_inspection_action_mode: false,
         }
     }
 
@@ -331,6 +339,14 @@ impl MetaMcp {
 
     /// Attach the webhook registry for `gateway_webhook_status` reporting.
     pub fn set_webhook_registry(&self, registry: Arc<parking_lot::RwLock<WebhookRegistry>>) {        *self.webhook_registry.write() = Some(registry);
+    }
+
+    /// Enable action mode for response-side anomaly screening (issue #133, D2).
+    ///
+    /// When called, responses with HIGH/CRITICAL inspection findings are
+    /// blocked with a security error rather than only logged.
+    pub fn enable_response_inspection_action_mode(&mut self) {
+        self.response_inspection_action_mode = true;
     }
 
     /// Attach a [`ReloadContext`] to enable the `gateway_reload_config` meta-tool.

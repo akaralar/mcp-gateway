@@ -411,15 +411,22 @@ impl MetaMcp {
             }
         };
 
-        // === POST-INVOKE: Response content inspection ===
+        // === POST-INVOKE: Response content inspection (issue #133, D2) ===
         //
-        // Scan the backend response for secrets, exfiltration URLs, and
-        // suspicious encoding patterns.  Observe mode (default) logs
-        // findings; action mode blocks HIGH/CRITICAL matches.
+        // Scan the backend response for secrets, exfiltration URLs, code
+        // injection patterns, and suspicious encoding.
+        //
+        // Observe mode (default, `action_mode = false`): logs findings and
+        // annotates the result with `_security_findings`.
+        // Action mode (`action_mode = true`): blocks any response with a
+        // HIGH/CRITICAL finding, returning a security error to the caller.
         {
             let text = crate::security::response_inspect::extract_text_from_result(&result);
             if !text.is_empty() {
-                let inspection = crate::security::response_inspect::inspect_response(&text, false);
+                let inspection = crate::security::response_inspect::inspect_response(
+                    &text,
+                    self.response_inspection_action_mode,
+                );
                 if inspection.has_findings() {
                     for finding in &inspection.findings {
                         warn!(
@@ -431,6 +438,16 @@ impl MetaMcp {
                             description = finding.description,
                             "Response inspection finding"
                         );
+                    }
+                    if inspection.should_block {
+                        return Err(Error::json_rpc(
+                            -32603,
+                            format!(
+                                "Tool '{tool}' on server '{server}' returned a response blocked \
+                                 by anomaly screening (HIGH/CRITICAL security finding detected). \
+                                 See gateway logs for details."
+                            ),
+                        ));
                     }
                     if let Some(obj) = result.as_object_mut() {
                         obj.insert(

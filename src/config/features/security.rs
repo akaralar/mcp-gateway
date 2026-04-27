@@ -100,6 +100,46 @@ impl Default for MessageSigningConfig {
     }
 }
 
+// ── ResponseInspectionConfig ──────────────────────────────────────────────────
+
+/// Configuration for response-side anomaly screening (issue #133, D2).
+///
+/// Scans every tool response for secrets (API keys, private keys), code
+/// injection patterns (base64|bash, pip/npm install), and exfiltration URLs
+/// before the result is returned to the client.
+///
+/// Two modes:
+/// - **Observe** (`action_mode = false`, default): logs findings but never
+///   blocks. Use while calibrating false-positive rates.
+/// - **Action** (`action_mode = true`): blocks any response with a HIGH or
+///   CRITICAL finding, returning a security error to the caller.
+///
+/// ```yaml
+/// security:
+///   response_inspection:
+///     enabled: true
+///     action_mode: true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResponseInspectionConfig {
+    /// Enable response inspection. Default: `true` (observe mode by default).
+    pub enabled: bool,
+    /// Block responses with HIGH/CRITICAL findings. Default: `false` (observe only).
+    ///
+    /// Set to `true` to enforce fail-closed behaviour for detected threats.
+    pub action_mode: bool,
+}
+
+impl Default for ResponseInspectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            action_mode: false,
+        }
+    }
+}
+
 // ── SecurityConfig ────────────────────────────────────────────────────────────
 
 /// Security configuration for the gateway.
@@ -125,6 +165,9 @@ pub struct SecurityConfig {
     /// Tamper-evident hash-chain transparency log (issue #133, D3). Default: disabled.
     #[serde(default)]
     pub transparency_log: TransparencyLogConfig,
+    /// Response-side anomaly screening (issue #133, D2). Default: enabled, observe mode.
+    #[serde(default)]
+    pub response_inspection: ResponseInspectionConfig,
 }
 
 impl Default for SecurityConfig {
@@ -138,6 +181,7 @@ impl Default for SecurityConfig {
             message_signing: MessageSigningConfig::default(),
             agent_identity: AgentIdentityConfig::default(),
             transparency_log: TransparencyLogConfig::default(),
+            response_inspection: ResponseInspectionConfig::default(),
         }
     }
 }

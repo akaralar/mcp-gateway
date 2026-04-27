@@ -253,6 +253,18 @@ impl Gateway {
             }
         }
 
+        // ── Response inspection action mode (issue #133, D2) ──────────────────
+        if self.config.security.response_inspection.enabled
+            && self.config.security.response_inspection.action_mode
+        {
+            Arc::get_mut(&mut meta_mcp)
+                .expect("no other Arc references at this point")
+                .enable_response_inspection_action_mode();
+            info!("Response inspection action mode enabled — HIGH/CRITICAL findings will block");
+        } else if self.config.security.response_inspection.enabled {
+            info!("Response inspection enabled in observe mode");
+        }
+
         Ok(BuiltMetaMcp {
             meta_mcp,
             tool_policy,
