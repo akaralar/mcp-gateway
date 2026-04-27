@@ -411,6 +411,110 @@ impl MetaMcp {
             }
         };
 
+        // === POST-INVOKE: Response contract gate (issue #133, D1) ===
+        //
+        // Validates the response against the per-tool contract declared in
+        // config.  Default-deny (fail_closed=true) can block responses from
+        // tools with no declared contract.
+        //
+        // Runs BEFORE D2 anomaly screening so contract violations abort early.
+        if let Some(ref contract_cfg) = self.response_contract {
+            let text = crate::security::response_inspect::extract_text_from_result(&result);
+            let tool_entry = contract_cfg.tools.get(tool);
+
+            // fail_closed: no contract declared for this tool → treat as violation
+            if contract_cfg.fail_closed && tool_entry.is_none() {
+                let effective_action_mode = contract_cfg.action_mode;
+                warn!(
+                    server,
+                    tool,
+                    trace_id,
+                    reason = "no_contract_declared",
+                    detail = "fail_closed is enabled and no contract is declared for this tool",
+                    "Response contract violation"
+                );
+                if effective_action_mode {
+                    return Err(Error::json_rpc(
+                        -32603,
+                        format!(
+                            "Tool '{tool}' on server '{server}' response blocked by contract gate: \
+                             no contract declared and fail_closed is enabled."
+                        ),
+                    ));
+                }
+                if let Some(obj) = result.as_object_mut() {
+                    obj.insert("_contract_violation".to_string(), serde_json::Value::Bool(true));
+                    obj.insert(
+                        "_contract_reason".to_string(),
+                        serde_json::Value::String("no_contract_declared".to_string()),
+                    );
+                }
+            } else if !text.is_empty() {
+                // Build effective contract merging global defaults with per-tool overrides.
+                let effective_max_bytes = tool_entry
+                    .and_then(|e| e.max_bytes)
+                    .or(contract_cfg.default_max_bytes);
+                let effective_action_mode = tool_entry
+                    .and_then(|e| e.action_mode)
+                    .unwrap_or(contract_cfg.action_mode);
+                let patterns: &[String] = tool_entry
+                    .map(|e| e.forbidden_patterns.as_slice())
+                    .unwrap_or(&[]);
+
+                let forbidden_patterns = if patterns.is_empty() {
+                    regex::RegexSet::empty()
+                } else {
+                    match regex::RegexSet::new(patterns) {
+                        Ok(set) => set,
+                        Err(e) => {
+                            warn!(
+                                server,
+                                tool,
+                                trace_id,
+                                error = %e,
+                                "Failed to compile forbidden_patterns for tool contract — skipping pattern check"
+                            );
+                            regex::RegexSet::empty()
+                        }
+                    }
+                };
+
+                let contract = crate::security::response_contract::ToolResponseContract {
+                    max_bytes: effective_max_bytes,
+                    forbidden_patterns,
+                    action_mode: effective_action_mode,
+                };
+
+                if let Some(violation) = contract.validate(&text) {
+                    warn!(
+                        server,
+                        tool,
+                        trace_id,
+                        reason = violation.reason,
+                        detail = %violation.detail,
+                        "Response contract violation"
+                    );
+                    if violation.should_block {
+                        return Err(Error::json_rpc(
+                            -32603,
+                            format!(
+                                "Tool '{tool}' on server '{server}' response blocked by contract gate: \
+                                 {} — {}",
+                                violation.reason, violation.detail
+                            ),
+                        ));
+                    }
+                    if let Some(obj) = result.as_object_mut() {
+                        obj.insert("_contract_violation".to_string(), serde_json::Value::Bool(true));
+                        obj.insert(
+                            "_contract_reason".to_string(),
+                            serde_json::Value::String(violation.reason.to_string()),
+                        );
+                    }
+                }
+            }
+        }
+
         // === POST-INVOKE: Response content inspection (issue #133, D2) ===
         //
         // Scan the backend response for secrets, exfiltration URLs, code

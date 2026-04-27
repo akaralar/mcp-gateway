@@ -265,6 +265,19 @@ impl Gateway {
             info!("Response inspection enabled in observe mode");
         }
 
+        // ── Response contract gate (issue #133, D1) ───────────────────────────
+        if self.config.security.response_contract.enabled {
+            Arc::get_mut(&mut meta_mcp)
+                .expect("no other Arc references at this point")
+                .set_response_contract(self.config.security.response_contract.clone());
+            let action = if self.config.security.response_contract.action_mode {
+                "action"
+            } else {
+                "observe"
+            };
+            info!(action, "Response contract gate enabled");
+        }
+
         Ok(BuiltMetaMcp {
             meta_mcp,
             tool_policy,

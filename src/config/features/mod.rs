@@ -26,6 +26,6 @@ pub use key_server::{
     PolicyMatchConfig, PolicyScopesConfig,
 };
 pub use playbooks::PlaybooksConfig;
-pub use security::{AgentIdentityConfig, SecurityConfig};
+pub use security::{AgentIdentityConfig, ResponseContractConfig, SecurityConfig, ToolContractConfig};
 pub use streaming::StreamingConfig;
 pub use webhooks::WebhookConfig;

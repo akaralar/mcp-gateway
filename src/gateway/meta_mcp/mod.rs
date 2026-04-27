@@ -172,6 +172,9 @@ pub struct MetaMcp {
     /// before delivery to the client.  When `false` (default), findings are
     /// logged but the response passes through.
     pub(super) response_inspection_action_mode: bool,
+
+    /// Response contract config (issue #133, D1). Set when enabled.
+    pub(super) response_contract: Option<Arc<crate::config::ResponseContractConfig>>,
 }
 
 // ============================================================================
@@ -222,6 +225,7 @@ impl MetaMcp {
             require_nonce: false,
             transparency_logger: None,
             response_inspection_action_mode: false,
+            response_contract: None,
         }
     }
 
@@ -347,6 +351,17 @@ impl MetaMcp {
     /// blocked with a security error rather than only logged.
     pub fn enable_response_inspection_action_mode(&mut self) {
         self.response_inspection_action_mode = true;
+    }
+
+    /// Attach a per-tool response contract config (issue #133, D1).
+    ///
+    /// When set, every tool response is validated against the declared contract
+    /// before delivery to the client.
+    pub fn set_response_contract(
+        &mut self,
+        config: crate::config::ResponseContractConfig,
+    ) {
+        self.response_contract = Some(Arc::new(config));
     }
 
     /// Attach a [`ReloadContext`] to enable the `gateway_reload_config` meta-tool.

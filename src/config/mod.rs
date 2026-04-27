@@ -30,7 +30,8 @@ pub use features::{
     CacheConfig, CapabilityConfig, CircuitBreakerConfig, CodeModeConfig, FailsafeConfig,
     HealthCheckConfig, KeyServerConfig, KeyServerOidcConfig, KeyServerPolicyConfig,
     KeyServerProviderConfig, PlaybooksConfig, PolicyMatchConfig, PolicyScopesConfig,
-    RateLimitConfig, RetryConfig, SecurityConfig, StreamingConfig, WebhookConfig,
+    RateLimitConfig, ResponseContractConfig, RetryConfig, SecurityConfig, StreamingConfig,
+    ToolContractConfig, WebhookConfig,
 };
 
 // ── Root config ───────────────────────────────────────────────────────────────

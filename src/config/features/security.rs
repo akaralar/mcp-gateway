@@ -140,6 +140,68 @@ impl Default for ResponseInspectionConfig {
     }
 }
 
+// ── ResponseContractConfig ────────────────────────────────────────────────────
+
+/// Per-tool response contract entry (issue #133, D1).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ToolContractConfig {
+    /// Maximum allowed text size in bytes. `null` means unlimited.
+    pub max_bytes: Option<usize>,
+    /// Regex patterns that must NOT appear in the response text.
+    pub forbidden_patterns: Vec<String>,
+    /// Override global action_mode for this tool. `null` means use global.
+    pub action_mode: Option<bool>,
+}
+
+/// Response contract configuration (issue #133, D1).
+///
+/// Validates every tool response against a declared per-tool contract before
+/// delivery to the client.  Supports size limits and forbidden regex patterns.
+///
+/// ```yaml
+/// security:
+///   response_contract:
+///     enabled: true
+///     action_mode: true
+///     fail_closed: false
+///     default_max_bytes: 102400
+///     tools:
+///       my_sensitive_tool:
+///         max_bytes: 4096
+///         forbidden_patterns:
+///           - 'sk-[a-zA-Z0-9]{48}'
+///           - 'BEGIN PRIVATE KEY'
+///         action_mode: true
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ResponseContractConfig {
+    /// Enable the contract gate. Default: `false` (opt-in).
+    pub enabled: bool,
+    /// Block violating responses (action_mode=true) or just observe. Default: `false`.
+    pub action_mode: bool,
+    /// Default max response bytes for all tools (overridable per-tool). Default: `None`.
+    pub default_max_bytes: Option<usize>,
+    /// When `true`, responses from tools with NO declared contract are blocked.
+    /// Default: `false` (backward-compatible pass-through for unconfigured tools).
+    pub fail_closed: bool,
+    /// Per-tool contracts keyed by tool name.
+    pub tools: std::collections::HashMap<String, ToolContractConfig>,
+}
+
+impl Default for ResponseContractConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            action_mode: false,
+            default_max_bytes: None,
+            fail_closed: false,
+            tools: std::collections::HashMap::new(),
+        }
+    }
+}
+
 // ── SecurityConfig ────────────────────────────────────────────────────────────
 
 /// Security configuration for the gateway.
@@ -168,6 +230,9 @@ pub struct SecurityConfig {
     /// Response-side anomaly screening (issue #133, D2). Default: enabled, observe mode.
     #[serde(default)]
     pub response_inspection: ResponseInspectionConfig,
+    /// Per-tool fail-closed response contract gate (issue #133, D1). Default: disabled.
+    #[serde(default)]
+    pub response_contract: ResponseContractConfig,
 }
 
 impl Default for SecurityConfig {
@@ -182,6 +247,7 @@ impl Default for SecurityConfig {
             agent_identity: AgentIdentityConfig::default(),
             transparency_log: TransparencyLogConfig::default(),
             response_inspection: ResponseInspectionConfig::default(),
+            response_contract: ResponseContractConfig::default(),
         }
     }
 }
